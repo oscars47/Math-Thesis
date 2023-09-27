@@ -21,12 +21,15 @@ def print_matrix(A, N=10, display=False):
     print(A)
 
     fig, ax = plt.subplots(2, 1, figsize=(7, 10))
-    # add colorbar
-    im = ax[0].imshow(np.real(A), cmap='RdBu_r', vmin=-max(0, np.real(A)[0][0]), vmax =max(0, np.real(A)[0][0]))
+
+    # Determine the scale for the real part
+    max_real = np.abs(np.real(A)).max()
+    im = ax[0].imshow(np.real(A), cmap='RdBu_r', vmin=-max_real, vmax=max_real)
     fig.colorbar(im, ax=ax[0])
-    
-# Display imaginary part and set color limits
-    im2 = ax[1].imshow(np.imag(A), cmap='RdBu_r', vmin=-max(0, np.imag(A)[0][0]), vmax = max(0, np.imag(A)[0][0]))
+
+    # Determine the scale for the imaginary part
+    max_imag = np.abs(np.imag(A)).max()
+    im2 = ax[1].imshow(np.imag(A), cmap='RdBu_r', vmin=-max_imag, vmax=max_imag)
     fig.colorbar(im2, ax=ax[1])
 
     ax[0].set_title('Real part')
@@ -40,34 +43,31 @@ def print_matrix(A, N=10, display=False):
         plt.show()
 
 # @jit(nopython=True)
-# def get_product_matrix(i, N):
-#     if i % 2 == 0:
-#         return np.kron(np.eye(2**(N-1), dtype=np.complex128), Sx)
-#     else:
-#         return np.kron(np.eye(2**(N-1), dtype=np.complex128), Sy)
+def majorana(ind, N):
+    ''' Returns the ind-th majorana fermion operator in qubit basis'''
+    def big_prod(m):
+        '''Returns the m-th product term in the majorana fermion chain in qubit basis'''
+        if m == 0:
+            return np.kron(Sz, np.eye(2**(N-1)))
+        elif m == N-2:
+            part= np.kron(np.eye(2**(N-2)), Sz)
+            return np.kron(part, np.eye(2))
+        else:
+            return np.kron(np.kron(np.eye(2**m), Sz), np.eye(2**(N-m-1)))
 
-@jit(nopython=True)
-def majorana(i, N=10):
-    '''Returns the i-th Majorana operator for a system of size N.'''
-    if i % 2 == 0:
-        op = Sx
+    # get the product of all the terms in the chain
+    prod = np.linalg.multi_dot([big_prod(m) for m in range(N-1)])
+    # add the last term which is either Sx or Sy at the end of the big tensor
+    if ind % 2 == 0:
+        prod = prod @ np.kron(np.eye(2**(N-1)), Sx)
     else:
-        op = Sy
-    
-    if i == 0:
-        return np.kron(op, np.eye(2**(N-1), dtype=np.complex128))
-    elif i == N - 1:
-        return np.kron(np.eye(2**(N-1), dtype=np.complex128), op)
-    else:
-        return np.kron(np.kron(np.eye(2**(i//2), dtype=np.complex128), op), np.eye(2**(N-1-i//2), dtype=np.complex128))
+        prod = prod @ np.kron(np.eye(2**(N-1)), Sy)
+    return prod
 
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def get_product_matrices(indices, N):
-    matrices  =[]
-    for ind in indices:
-        matrices.append(majorana(ind, N))
-    return matrices
+    return np.array([majorana(i, N) for i in indices])
 
 def do_chunk(ind, N = 10, J2=2):
         c = np.random.normal(loc=0.0, scale=math.factorial(3)*J2/(2**(N)))
@@ -104,25 +104,35 @@ def get_H(N=10):
 
 if __name__ == "__main__":
     import time
-    # for N in range(4, 11):
-    #     t0 = time.time()
-    #     H = get_H(N)
-    #     t1 = time.time()
-    #     print('time taken: ', t1-t0)
-    #     np.save('ham/H_' + str(N) + '.npy', H)
-    #     print('H_' + str(N) + ' saved')
+    from tqdm import trange
+    
+    for N in range(4, 11):
+        t0 = time.time()
+        H = get_H(N)
+        t1 = time.time()
+        print('time taken: ', t1-t0)
+        np.save('ham/H_' + str(N) + '.npy', H)
+        print('H_' + str(N) + ' saved')
         
-    #     # get image
-    #     print_matrix(H, N=N)
-    N = 6
-    H = get_H(N)
-    print_matrix(H, N=N, display=True)
+        # get image
+        print_matrix(H, N=N)
+
+    # get a bunch for H_10s:
+    for i in trange(100):
+        H = get_H(10)
+        np.save('ham/H_10/H_10_' + str(i) + '.npy', H)
+        print('H_10_' + str(i) + ' saved')
+
+
+
+
+    # N = 4
+    # H = get_H(N)
+    # print_matrix(H, N=N, display=True)
 
     # load H
     # N=6
     # H = np.load(f'ham/H_{N}.npy')
     # # check if H is hermitian
-    print('H is hermitian: ', is_hermitian(H))
-
-    # look at 
+    # print('H is hermitian: ', is_hermitian(H))
 
