@@ -2,64 +2,106 @@
 
 import numpy as np
 import os
-
+import matplotlib.pyplot as plt
 from syk import majorana
 
-def get_H(N, one_random = True):
+
+def get_H(N, use_0 = True):
     '''Returns the SYK Hamiltonian for N qubits.
     Params:
         N: number of qubits
         one_random: if True, randomly selects one Hamiltonian from the H_N folder
     '''
-    assert one_random, "Currently only one_random = True is supported"
 
     # get random state
-    H_files = os.listdir('ham/H_{}'.format(N))
-    H_file = np.random.choice(H_files)
-    H = np.load('ham/H_{}/{}'.format(N, H_file), allow_pickle=True)
+    H_files = os.listdir(f'ham/H_{N}')
+    # must end in .npy
+    H_files = [f for f in H_files if f.endswith('.npy')]
+    if use_0:
+        H_file_L = [f for f in H_files if f.endswith('0.npy')][0]
+        H_file_R = [f for f in H_files if f.endswith('0.npy')][0]
+        H_L = np.load(f'ham/H_{N}/{H_file_L}', allow_pickle=True)
+        H_R = np.load(f'ham/H_{N}/{H_file_R}', allow_pickle=True)
+        H = H_L + H_R
 
     return H
 
-def init_TFD(H, beta = 4):
-    '''Creates TFD state using an SYK Hamiltonian with N qubits.
-    Params:
-        H: SYK Hamiltonian
-        beta: inverse temperature, given in the Jafferis paper as 4
-    '''
-    N = int(np.log2(H.shape[0]))
+def get_T(t, H, N):
+    '''Returns the register T state at time t.'''
+    # sum over j for the potential operator and then over n for the TFD state
+    T = np.zeros((2**N, 1), dtype=np.complex128)
+    for j in range(N):
+        exp_psi_j = np.exp(majorana(j, N))
+        for n in range(2**N):
+            # get the nth column vector
+            col = np.zeros((2**N, 1), dtype=np.complex128)
+            col[n] = 1
+            # get the eigenvalue from H
+            E_n = H[n][n]
+            # multiply by e^{-i lamda_n t}
+            col_t = col * np.exp(-1j * E_n * t)
+            # multiply by psi_j
+            col_t = exp_psi_j @ col_t
+            # add to T
+            T += col_t
 
-    # sum over 0 to 2^N - 1; take the tensor products of the column vectors and weight by e^{-beta E_n}
-    TFD = np.zeros((2**(2*N), 1), dtype=np.complex128)
+    # return the state
+    return T
 
-    for n in range(2**N):
-        # get the nth column vector
-        col = np.zeros((2**N, 1), dtype=np.complex128)
-        col[n] = 1
-        # get tensor prod
-        col_t = np.kron(col, col)
-        # the energy of the nth state is the eigenvalue of the nth column vector
-        E_n = H[n][n]
-        # weight by e^{-beta E_n}
-        TFD += np.exp(-beta * E_n) * col_t
-    # weight the whole thing by 1/sqrt(Z)
-    TFD /= np.sqrt(np.sum(np.abs(TFD)**2))
-    return TFD
+def get_P(N):
+    '''Returns density matrix of left particle in Phi+ bell state'''
+    zero = np.zeros((2**N, 1), dtype=np.complex128)
+    zero[0] = 1
+    one = np.zeros((2**N, 1), dtype=np.complex128)
+    one[1] = 1
 
-def tev_TFD(t, TFD, H):
-    '''Time-evolves the TFD state by t.'''
-    # loop through all columns and multiply by e^{-i lamda_n t}
-    N = int(np.log2(H.shape[0]))
-    for n in range(2**N):
-        col = TFD[n]
-        # get the eigenvalue from H
-        E_n = H[n][n]
-        # multiply by e^{-i lamda_n t}
-        TFD[n] = col * np.exp(-1j * E_n * t)
-    return TFD
+    P = (zero + one ) / np.sqrt(2)
+    P.reshape((2**N, 1))
+    return P 
 
-def neg_shockwave(TFD, mu = -12):
-    '''Multiply the TFD by e^{imu V}'''
-    # first define V in terms of tensor products of the majorana matrices from syk
+def S(rho):
+    '''Returns the von Neumann entropy of the density matrix rho'''
+    print(rho)
+    return -np.trace(rho @ np.log(rho))
+
+def get_Ipt(t, H, N):
+    '''Returns the mutual information between the left bell state and the right wormhole state'''
+    # get the P state
+    P = get_P(N)
+    # get the T state
+    T = get_T(t, H, N)
+    # get the combined state
+    PT = np.kron(P, T)
+    # get the density matrix for P
+    P_mat = PT @ PT.conj().T
+    # get the density matrix for T
+    T_mat = PT.conj().T @ PT
+    # get the density matrix for PT
+    PT_mat = PT @ PT.conj().T
+
+    # get the mutual information
+    return S(P_mat) + S(T_mat) - S(PT_mat)
+
+def make_Ipt_graph(t_min, t_max, H, N):
+    '''Creates a graph of the mutual information between the left bell state and the right wormhole state
+    as a function of time.'''
+    # time-evolve the TFD state by t
+    t = np.linspace(t_min, t_max, 100)
+    Ipt = np.zeros(t.shape)
+    for i in range(len(t)):
+        Ipt[i] = get_Ipt(t[i], H, N)
+    
+    plt.plot(t, Ipt)
+    plt.show()
+
+if __name__=='__main__':
+    N = 4
+    H = get_H(N)
+
+    get_Ipt(0, H, N)
+
+    # make_Ipt_graph(0, 30, H, N)
+
 
 
 
