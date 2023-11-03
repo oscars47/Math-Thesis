@@ -2,9 +2,7 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 from multiprocessing import Pool, cpu_count
-from numba import jit
-from itertools import combinations
-from functools import partial
+import datetime
 
 # define pauli matrices
 Sx = np.array([[0, 1], [1, 0]]) 
@@ -15,7 +13,7 @@ def is_hermitian(A):
     '''Returns True if A is Hermitian, False otherwise'''
     return np.allclose(A, A.conj().T)
 
-def print_matrix(A, N=10, display=False):
+def print_matrix(A, l_r, ts, N=10,display=False):
     '''Prints the matrix.'''
     print(A)
 
@@ -39,7 +37,7 @@ def print_matrix(A, N=10, display=False):
     ax[0].set_title('Real part')
     ax[1].set_title('Imaginary part')
 
-    plt.suptitle('N = ' + str(N) + ' SYK Hamiltonian')
+    plt.suptitle(f'N = {N}, {l_r} SYK Hamiltonian')
     # fig.subplots_adjust(wspace=0.1)  # Adjust this value as needed
     plt.tight_layout()
 
@@ -47,12 +45,12 @@ def print_matrix(A, N=10, display=False):
     if not os.path.exists(f'ham/H_{N}'):
         os.makedirs(f'ham/H_{N}')
 
-    plt.savefig(f'ham/H_{N}/SYK_{N}.pdf')
+    plt.savefig(f'ham/H_{N}/SYK_{N}_{l_r}_{ts}.pdf')
     if display:
         plt.show()
 
 # @jit(nopython=True)
-def majorana(ind, N):
+def majorana_li(ind, N):
     ''' Returns the ind-th majorana fermion operator in qubit basis'''
     def big_prod(m):
         '''Returns the m-th product term in the majorana fermion chain in qubit basis'''
@@ -87,43 +85,50 @@ def majorana_left(ind, N):
     if ind % 2 != 0: # odd: m = 2j - 1
         j = (ind + 1) // 2
         # loop to tensor Z tensor X j-1 times
-        for n in range(j):
-            if n > 0:
-                prod = np.kron(prod, Sz)
-            else:
-                prod = Sz
-            prod = np.kron(prod, Sx)
-        # tensor with X tensor X
-        if j > 0:
+        if j > 1:
+            for n in range(j-1):
+                if n > 0:
+                    prod = np.kron(prod, Sz)
+                else:
+                    prod = Sz
+                prod = np.kron(prod, Sx)
+            # tensor with X tensor X
+            # print(prod.shape)
             prod = np.kron(prod, Sx)
         else:
             prod = Sx
         prod = np.kron(prod, Sx)
-        # tensor with I tensor I for N/2 - m times
-        for _ in range(N//2 - j-1):
+        # tensor with I tensor I for N/2 - j times
+        for _ in range(N//2 - j):
             prod = np.kron(prod, np.eye(2))
             prod = np.kron(prod, np.eye(2))
+    
         return prod * 1/np.sqrt(2)
 
     else: # even: m = 2j
             # loop to tensor Z tensor X j-1 times
         j = ind // 2
-        for n in range(j):
-            if n > 0:
-                prod = np.kron(prod, Sz)
-            else:
-                prod = Sz
-            prod = np.kron(prod, Sx)
-        # tensor with Y tensor X
-        if j > 0:
+        if j > 1:
+            for n in range(j-1):
+                if n > 0:
+                    prod = np.kron(prod, Sz)
+                else:
+                    prod = Sz
+                prod = np.kron(prod, Sx)
+            # tensor with Y tensor X
             prod = np.kron(prod, Sy)
         else:
             prod = Sy
         prod = np.kron(prod, Sx)
         # tensor with I tensor I for N - m times
-        for _ in range(N//2 - j-1):
-            prod = np.kron(prod, np.eye(2))
-            prod = np.kron(prod, np.eye(2))
+        if j > 0:
+            for _ in range(N//2 - j):
+                prod = np.kron(prod, np.eye(2))
+                prod = np.kron(prod, np.eye(2))
+        else:
+            for _ in range(N//2 - j - 1):
+                prod = np.kron(prod, np.eye(2))
+                prod = np.kron(prod, np.eye(2))
         return prod * 1/np.sqrt(2)
 
 def majorana_right(ind, N):
@@ -132,20 +137,20 @@ def majorana_right(ind, N):
     if ind % 2 != 0: # odd: m = 2j - 1
         j = (ind + 1) // 2
         # loop to tensor Z tensor X j-1 times
-        for n in range(j):
-            if n > 0:
-                prod = np.kron(prod, Sz)
-            else:
-                prod = Sz
-            prod = np.kron(prod, Sx)
-        # tensor with X tensor X
-        if j > 0:
+        if j > 1:
+            for n in range(j-1):
+                if n > 0:
+                    prod = np.kron(prod, Sz)
+                else:
+                    prod = Sz
+                prod = np.kron(prod, Sx)
+            # tensor with I tensor Y
             prod = np.kron(prod, np.eye(2))
         else:
             prod = np.eye(2)
         prod = np.kron(prod, Sy)
         # tensor with I tensor I for N/2 - m times
-        for _ in range(N//2 - j-1):
+        for _ in range(N//2 - j):
             prod = np.kron(prod, np.eye(2))
             prod = np.kron(prod, np.eye(2))
         return prod * 1/np.sqrt(2)
@@ -153,40 +158,57 @@ def majorana_right(ind, N):
     else: # even: m = 2j
             # loop to tensor Z tensor X j-1 times
         j = ind // 2
-        for n in range(j):
-            if n > 0:
-                prod = np.kron(prod, Sz)
-            else:
-                prod = Sz
-            prod = np.kron(prod, Sx)
-        # tensor with Y tensor X
-        if j > 0:
+        if j > 1:
+            for n in range(j-1):
+                if n > 0:
+                    prod = np.kron(prod, Sz)
+                else:
+                    prod = Sz
+                prod = np.kron(prod, Sx)
+                # tensor with Y tensor X
             prod = np.kron(prod, np.eye(2))
         else:
             prod = np.eye(2)
         prod = np.kron(prod, Sz)
         # tensor with I tensor I for N - m times
-        for _ in range(N//2 - j-1):
-            prod = np.kron(prod, np.eye(2))
-            prod = np.kron(prod, np.eye(2))
+        if j > 0:
+            for _ in range(N//2 - j):
+                prod = np.kron(prod, np.eye(2))
+                prod = np.kron(prod, np.eye(2))
+        else:
+            for _ in range(N//2 - j - 1):
+                prod = np.kron(prod, np.eye(2))
+                prod = np.kron(prod, np.eye(2))
         return prod * 1/np.sqrt(2)
 
 # @jit(nopython=True)
-def get_product_matrices(indices, N):
-    return np.array([majorana(i, N) for i in indices])
+def get_product_matrices(indices, N, l_r = 'left'):
+    '''Returns the product of the majorana operators corresponding to the indices in the list indices.
+    Params:
+        indices: list of indices of the majorana operators
+        N: number of qubits
+        l_r: 'left' or 'right' or 'li' depending on whether the majorana operators are on the left or right side of the chain or instead using li's notation
 
-def do_chunk(ind, N = 10, J2=2):
-    '''Returns the contribution of the ind-th term to the Hamiltonian.'''
-    c = np.random.normal(loc=0.0, scale=math.factorial(3)*J2/(2**(N)))
-    product_matrices = get_product_matrices(ind, N)
-    # prod_tot = np.linalg.multi_dot([product_matrices[k] for k in range(len(product_matrices))])
-    # can't use multi_dot because it doesn't support jit
-    prod_tot = product_matrices[0]
-    for k in range(1, len(product_matrices)):
-        prod_tot = prod_tot @ product_matrices[k]
-    return c * prod_tot
+    Returns:
+        a matrix corresponding to the product of the majorana operators
+    
+    '''
+    product = np.eye(2**N, dtype=complex)
+    if l_r == 'left':
+       for i in indices:
+            product = product @  majorana_left(i, N)
+    elif l_r == 'right':
+        for i in indices:
+            try:
+                product = product @ majorana_right(i, N)
+            except ValueError:
+                print('ValueError at i = ', i)
+    elif l_r == 'li':
+        for i in indices:
+            product = product @ majorana_li(i, N)
+    return product
 
-def get_H(N=10):
+def get_H(N=10, J2=2, l_r = 'left'):
     '''Returns the SYK Hamiltonian for N qubits.'''
     H = np.zeros((2**N, 2**N), dtype=np.complex128)
 
@@ -196,23 +218,48 @@ def get_H(N=10):
     # indices = np.array(list(combinations(range(N), 4)))
     indices = []
     for i in range(N-3):
-        for j in range(i, N-2, 1):
-            for l in range(j, N-1, 1):
-                for k in range(l, N,1):
-                    indices.append([i, j, k, l])
+        for j in range(i+1, N-2, 1):
+            for l in range(j+1, N-1, 1):
+                for k in range(l+1, N,1):
+                    indices.append([i, j, l, k])
     indices = np.array(indices)
 
-    func = partial(do_chunk, N=N, J2=2)
+    # precompute the majorana
+    product_matrices = np.array([get_product_matrices(index_ls, N, l_r)  for index_ls in indices])
+    print(product_matrices.shape)
+    c = np.random.normal(loc=0.0, scale=math.factorial(3)*J2/(2**(N)), size=len(product_matrices))
+    # scale each product matrix by the corresponding c
+    H_terms = np.array([c[i] * product_matrices[i] for i in range(len(indices))])
+   
+    def is_zero(mat):
+        '''Returns True if the matrix is all zeros.'''
+        return np.isclose(mat, np.zeros((2**N, 2**N)), atol = 1e-10).all()
 
-    # now do the parallelization
-    with Pool(processes=cpu_count()) as pool:
-        results = pool.map(func, indices)
+    # check if any of the matrices are all zeros
+    zero_mats = np.array([is_zero(mat) for mat in H_terms])
+   
+    print(f'Number of 0 matrices: {np.sum(zero_mats)}')
+    print(f'Number of non-0 matrices: {len(H_terms) - np.sum(zero_mats)}')
+    print(f'Fraction of total matrices: {np.sum(zero_mats) / len(H_terms)}')
+    
+    # ---------------------
+    # sum all the terms
+    H = np.zeros((2**N, 2**N), dtype=np.complex128)
+    for i in range(len(indices)):
+        H += H_terms[i]
+    # ---------------------
+    # save H with timestamp
+    # ---------------------
+    # make sure directory exists
+    if not os.path.exists(f'ham/H_{N}'):
+        os.makedirs(f'ham/H_{N}')
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    np.save(f'ham/H_{N}/H_{N}_{l_r}_{timestamp}.npy', H)
+    return H, timestamp
 
-    # now add all the results to get the Hamiltonian
-    for result in results:
-        H += result
 
-    return H
+def anti_commutator(A, B):
+    return A @ B + B @ A
 
 if __name__ == "__main__":
     import time, os
@@ -283,17 +330,42 @@ if __name__ == "__main__":
     # print_matrix(get_H(6), N=6)
 
     ## comparing the majorana operators ##
-    N = 4
-    print('Li et al: ')
-    l_0 = majorana(0, N)
-    print(l_0)
-    print(l_0.shape)
-    print('Jafferis and Gao, L ')
-    ml_0 = majorana_left(0, N)
-    print(ml_0)
-    print(ml_0.shape)
-    print('Jafferis and Gao, R ')
-    ml_0 = majorana_right(0, N)
-    print(ml_0)
-    print(ml_0.shape)
+    N = 8
+    # for ind in range(N):
+    #     print(majorana_left(ind, N).shape)
+    #     print(majorana_right(ind, N).shape)
+
+    # print(majorana_right(6, N).shape)
+
+
+    H_l, ts_l = get_H(N, l_r='left')
+    H_r, ts_r = get_H(N, l_r='right')
+
+    print('H_l: ')
+    print_matrix(H_l, N=N, l_r = 'Left', ts=ts_l)
+    print('Is H_l hermitian? ', is_hermitian(H_l))
+    print('H_r: ')
+    print_matrix(H_r, N=N, l_r = 'Right', ts=ts_r)
+    print('Is H_r hermitian? ', is_hermitian(H_r))
+
+
+
+
+
+    # print('Li et al: ')
+    # l_0 = majorana(0, N)
+    # l_1 = majorana(1, N)
+    # print(l_0)
+    # print(l_0.shape)
+    # print(anti_commutator(l_0, l_1))
+    # print('Jafferis and Gao, L ')
+    # ml_0 = majorana_left(0, N)
+    # print(ml_0)
+    # print(ml_0.shape)
+    # print('Jafferis and Gao, R ')
+    # mr_0 = majorana_right(1, N)
+    # print(mr_0)
+    # print(mr_0.shape)
+    # print('Commutator of L and R: ')
+    # print(anti_commutator(ml_0, mr_0))
 
