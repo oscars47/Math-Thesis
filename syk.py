@@ -1,7 +1,6 @@
 import numpy as np
 import math
 import matplotlib.pyplot as plt
-from multiprocessing import Pool, cpu_count
 import datetime
 
 # define pauli matrices
@@ -180,6 +179,24 @@ def majorana_right(ind, N):
                 prod = np.kron(prod, np.eye(2))
                 prod = np.kron(prod, np.eye(2))
         return prod * 1/np.sqrt(2)
+    
+def get_dirac_left(ind, N):
+    '''Gets the left dirac operator corresponding to the ind-th majorana operator'''
+    m_left_0 = majorana_left(ind*2+1, N)
+    m_left_1 = majorana_right(ind*2, N)
+
+    return 1/np.sqrt(2) * (m_left_0 + 1j * m_left_1)
+
+def get_dirac_right(ind, N):
+    '''Gets the right dirac operator corresponding to the ind-th majorana operator'''
+    m_right_0 = majorana_right(ind*2+1, N)
+    m_right_1 = majorana_left(ind*2, N)
+
+    return 1/np.sqrt(2) * (m_right_0 + 1j * m_right_1)
+
+def time_ev(H, t):
+    '''Returns the time evolution operator for the Hamiltonian H at time t.'''
+    return np.exp(-1j * H * t)
 
 # @jit(nopython=True)
 def get_product_matrices(indices, N, l_r = 'left'):
@@ -324,11 +341,6 @@ if __name__ == "__main__":
         plt.savefig('ham/H_' + str(N) + '/hist.pdf')
         plt.show()
 
-    # combine_N(10)
-    # gen_HN(1, 10, display=True)
-    # print_matrix(get_H(4), N=4)
-    # print_matrix(get_H(6), N=6)
-
     ## comparing the majorana operators ##
     N = 8
     # for ind in range(N):
@@ -347,9 +359,6 @@ if __name__ == "__main__":
     print('H_r: ')
     print_matrix(H_r, N=N, l_r = 'Right', ts=ts_r)
     print('Is H_r hermitian? ', is_hermitian(H_r))
-
-
-
 
 
     # print('Li et al: ')
