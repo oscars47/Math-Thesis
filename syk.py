@@ -9,13 +9,32 @@ Sy = np.array([[0, -1j], [1j, 0]])
 Sz = np.array([[1, 0], [0, -1]])
 I = np.eye(2)
 
+# helper functions #
 def is_hermitian(A):
     '''Returns True if A is Hermitian, False otherwise'''
     return np.allclose(A, A.conj().T)
 
-def print_matrix(A, l_r, ts, N=10,display=False):
-    '''Prints the matrix.'''
-    print(A)
+def anti_commutator(A, B):
+    return A @ B + B @ A
+
+def is_zero(mat):
+        '''Returns True if the matrix is all zeros.'''
+        return np.isclose(mat, np.zeros((2**N, 2**N)), atol = 1e-10).all()
+
+def print_matrix(A, l_r= None, ts = None, N=10,display=False, is_SYK = True, other_name = None):
+    '''Prints the matrix.
+
+    Params:
+        A: matrix to print
+        l_r: 'left' or 'right' or 'li' depending on whether the majorana operators are on the left or right side of the chain or instead using li's notation
+        ts: timestamp of when the matrix was saved
+        N: number of qubits
+        display: if true, displays the matrix
+        is_SYK: if true, saves assuming SYK. Otherwise, saves in directory corresponding to the Hamiltonian type (e.g. H_10)
+        other_name: optional string param to save the matrix with a different name
+    
+    
+    '''
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
 
@@ -45,11 +64,13 @@ def print_matrix(A, l_r, ts, N=10,display=False):
     if not os.path.exists(f'ham/H_{N}'):
         os.makedirs(f'ham/H_{N}')
 
-    plt.savefig(f'ham/H_{N}/SYK_{N}_{l_r}_{ts}.pdf')
+    if is_SYK:
+        plt.savefig(f'ham/H_{N}/SYK_{N}_{l_r}_{ts}.pdf')
+    else:
+        plt.savefig(f'ham/H_{N}/{other_name}.pdf')
     if display:
         plt.show()
 
-# @jit(nopython=True)
 def majorana_li(ind, N):
     ''' Returns the ind-th majorana fermion operator in qubit basis'''
     def big_prod(m):
@@ -91,7 +112,7 @@ def majorana_left(ind, N):
     '''
 
     assert ind > 0, 'Index must be greater than 0.'
-    assert ind <= N, 'Index must be less than or equal to N.'
+    assert ind <= N, f'Index must be less than or equal to N. Index = {ind}, N = {N}'
     
     if ind % 2 != 0: # odd: m = 2j - 1
         j = (ind + 1) // 2
@@ -153,6 +174,7 @@ def majorana_right(ind, N):
     '''
 
     assert ind > 0, 'Index must be greater than 0.'
+    assert ind <= N, f'Index must be less than or equal to N. Index = {ind}, N = {N}'
     
     if ind % 2 != 0: # odd: m = 2j - 1
         j = (ind + 1) // 2
@@ -202,17 +224,23 @@ def majorana_right(ind, N):
 
         return prod * 1/np.sqrt(2)
     
-def get_dirac_left(ind, N):
+def get_dirac_left(j, N):
     '''Gets the left dirac operator corresponding to the ind-th majorana operator'''
-    m_left_0 = majorana_left(ind*2+1, N)
-    m_left_1 = majorana_right(ind*2, N)
+    assert j > 0, 'Index must be > 0.'
+    assert j <= N//2, 'Index must be less than N/2.'
+
+    m_left_0 = majorana_left(j*2-1, N)
+    m_left_1 = majorana_left(j*2, N)
 
     return 1/np.sqrt(2) * (m_left_0 + 1j * m_left_1)
 
-def get_dirac_right(ind, N):
+def get_dirac_right(i, N):
     '''Gets the right dirac operator corresponding to the ind-th majorana operator'''
-    m_right_0 = majorana_right(ind*2+1, N)
-    m_right_1 = majorana_left(ind*2, N)
+    assert i > 0, 'Index must be > 0.'
+    assert i <= N//2, 'Index must be less than N/2.'
+
+    m_right_0 = majorana_right(i*2-1, N)
+    m_right_1 = majorana_right(i*2, N)
 
     return 1/np.sqrt(2) * (m_right_0 + 1j * m_right_1)
 
@@ -220,7 +248,6 @@ def time_ev(H, t):
     '''Returns the time evolution operator for the Hamiltonian H at time t.'''
     return np.exp(-1j * H * t)
 
-# @jit(nopython=True)
 def get_product_matrices(indices, N, l_r = 'left'):
     '''Returns the product of the majorana operators corresponding to the indices in the list indices.
     Params:
@@ -247,8 +274,23 @@ def get_product_matrices(indices, N, l_r = 'left'):
             product = product @ majorana_li(i, N)
     return product
 
-def get_H(N=10, J2=2, l_r = 'left'):
-    '''Returns the SYK Hamiltonian for N qubits.'''
+def get_H(N=10, J2=2, dirac=False, l_r = 'left'):
+    '''Returns the SYK Hamiltonian for N qubits.
+
+    Params:
+        N: number of qubits
+        J2: coupling constant
+        dirac: If true, saves H_L and H_R using same coupling constant as specified in 2.37 in Jafferis and Gao. If false, only saves either left or right as indicated by l_r.
+        l_r: 'left' or 'right' or 'li' depending on whether the majorana operators are on the left or right side of the chain or instead using li's notation
+
+    Returns:
+        H: SYK Hamiltonian
+        timestamp: timestamp of when the matrix was saved
+
+        Also saves the matrix in the ham/H_N directory.
+    
+    
+    '''
     H = np.zeros((2**N, 2**N), dtype=np.complex128)
 
     # parallelize this ----
@@ -264,41 +306,52 @@ def get_H(N=10, J2=2, l_r = 'left'):
     indices = np.array(indices)
 
     # precompute the majorana
-    product_matrices = np.array([get_product_matrices(index_ls, N, l_r)  for index_ls in indices])
-    print(product_matrices.shape)
-    c = np.random.normal(loc=0.0, scale=math.factorial(3)*J2/(2**(N)), size=len(product_matrices))
-    # scale each product matrix by the corresponding c
-    H_terms = np.array([c[i] * product_matrices[i] for i in range(len(indices))])
-   
-    def is_zero(mat):
-        '''Returns True if the matrix is all zeros.'''
-        return np.isclose(mat, np.zeros((2**N, 2**N)), atol = 1e-10).all()
+    if not(dirac):
+        product_matrices = np.array([get_product_matrices(index_ls, N, l_r)  for index_ls in indices])
+        print(product_matrices.shape)
+        c = np.random.normal(loc=0.0, scale=math.factorial(3)*J2/(2**(N)), size=len(product_matrices))
+        # scale each product matrix by the corresponding c
+        H_terms = np.array([c[i] * product_matrices[i] for i in range(len(indices))])
 
-    # check if any of the matrices are all zeros
-    zero_mats = np.array([is_zero(mat) for mat in H_terms])
-   
-    print(f'Number of 0 matrices: {np.sum(zero_mats)}')
-    print(f'Number of non-0 matrices: {len(H_terms) - np.sum(zero_mats)}')
-    print(f'Fraction of total matrices: {np.sum(zero_mats) / len(H_terms)}')
-    
-    # ---------------------
-    # sum all the terms
-    H = np.zeros((2**N, 2**N), dtype=np.complex128)
-    for i in range(len(indices)):
-        H += H_terms[i]
-    # ---------------------
-    # save H with timestamp
-    # ---------------------
-    # make sure directory exists
-    if not os.path.exists(f'ham/H_{N}'):
-        os.makedirs(f'ham/H_{N}')
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    np.save(f'ham/H_{N}/H_{N}_{l_r}_{timestamp}.npy', H)
-    return H, timestamp
+        # ---------------------
+        # sum all the terms
+        H = np.zeros((2**N, 2**N), dtype=np.complex128)
+        for i in range(len(indices)):
+            H += H_terms[i]
+        # ---------------------
+        # save H with timestamp
+        # ---------------------
+        # make sure directory exists
+        if not os.path.exists(f'ham/H_{N}'):
+            os.makedirs(f'ham/H_{N}')
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        np.save(f'ham/H_{N}/H_{N}_{l_r}_{timestamp}.npy', H)
+        return H, timestamp
+    else:
+        prod_left = np.array([get_product_matrices(index_ls, N, 'left')  for index_ls in indices])
+        prod_right = np.array([get_product_matrices(index_ls, N, 'right')  for index_ls in indices])
+        c = np.random.normal(loc=0.0, scale=math.factorial(3)*J2/(2**(N)), size=len(prod_left))
+        # scale each product matrix by the corresponding c
+        H_terms_l = np.array([c[i] * prod_left[i] for i in range(len(indices))])
+        H_terms_r = np.array([c[i] * prod_right[i] for i in range(len(indices))])
 
-
-def anti_commutator(A, B):
-    return A @ B + B @ A
+        # ---------------------
+        # sum all the terms
+        H_l = np.zeros((2**N, 2**N), dtype=np.complex128)
+        H_r = np.zeros((2**N, 2**N), dtype=np.complex128)
+        for i in range(len(indices)):
+            H_l += H_terms_l[i]
+            H_r += H_terms_r[i]
+        # ---------------------
+        # save H with timestamp
+        # ---------------------
+        # make sure directory exists
+        if not os.path.exists(f'ham/H_{N}'):
+            os.makedirs(f'ham/H_{N}')
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        np.save(f'ham/H_{N}/H_{N}_left_{timestamp}.npy', H_l)
+        np.save(f'ham/H_{N}/H_{N}_right_{timestamp}.npy', H_r)
+        return [H_l, H_r], timestamp
 
 if __name__ == "__main__":
     import time, os
@@ -330,7 +383,6 @@ if __name__ == "__main__":
             print('time taken: ', t1-t0)
             np.save('ham/H_10/H_10_' + str(i) + '.npy', H)
             print('H_10_' + str(i) + ' saved')
-
     def combine_N(N):
         '''Reads in all H_N matrices and makes a histogram of the real and imaginary parts of the eigenvalues.'''
         # initialize the arrays
@@ -364,7 +416,20 @@ if __name__ == "__main__":
         plt.show()
 
     ## comparing the majorana operators ##
-    N = 8
+    N = 10
+    # get_H(N, dirac=True)
+    n_l = 3
+    n_r = 3
+    print_matrix(get_dirac_left(n_l, N), N, is_SYK=False, other_name=f'dirac_left_{n_l}')
+    print_matrix(get_dirac_right(n_r, N), N, is_SYK=False, other_name=f'dirac_right_{n_r}')
+    
+
+
+
+
+
+
+
     # print('-------')
     # for ind in range(1, N+1):
     #     print(ind)
@@ -376,47 +441,16 @@ if __name__ == "__main__":
     # print(majorana_right(0, N))
     # print(np.trace(anti_commutator(majorana_right(3, N), majorana_left(1, N))))
 
+    # H_l, ts_l = get_H(N, l_r='left')
+    # H_r, ts_r = get_H(N, l_r='right')
 
+    # print('H_l: ')
+    # print_matrix(H_l, N=N, l_r = 'Left', ts=ts_l)
+    # print('Is H_l hermitian? ', is_hermitian(H_l))
+    # print('e vals of H_l: ', np.linalg.eigvals(H_l))
+    # print('H_r: ')
+    # print_matrix(H_r, N=N, l_r = 'Right', ts=ts_r)
+    # print('Is H_r hermitian? ', is_hermitian(H_r))
+    # print('e vals of H_r: ', np.linalg.eigvals(H_r))
 
-
-
-
-
-
-    # for ind in range(N):
-    #     print(majorana_left(ind, N).shape)
-    #     print(majorana_right(ind, N).shape)
-
-    # print(majorana_right(6, N).shape)
-
-
-    H_l, ts_l = get_H(N, l_r='left')
-    H_r, ts_r = get_H(N, l_r='right')
-
-    print('H_l: ')
-    print_matrix(H_l, N=N, l_r = 'Left', ts=ts_l)
-    print('Is H_l hermitian? ', is_hermitian(H_l))
-    print('H_r: ')
-    print_matrix(H_r, N=N, l_r = 'Right', ts=ts_r)
-    print('Is H_r hermitian? ', is_hermitian(H_r))
-
-    # print(get_dirac_left(0, N))
-
-
-    # print('Li et al: ')
-    # l_0 = majorana(0, N)
-    # l_1 = majorana(1, N)
-    # print(l_0)
-    # print(l_0.shape)
-    # print(anti_commutator(l_0, l_1))
-    # print('Jafferis and Gao, L ')
-    # ml_0 = majorana_left(0, N)
-    # print(ml_0)
-    # print(ml_0.shape)
-    # print('Jafferis and Gao, R ')
-    # mr_0 = majorana_right(1, N)
-    # print(mr_0)
-    # print(mr_0.shape)
-    # print('Commutator of L and R: ')
-    # print(anti_commutator(ml_0, mr_0))
 
