@@ -7,6 +7,7 @@ import datetime
 Sx = np.array([[0, 1], [1, 0]]) 
 Sy = np.array([[0, -1j], [1j, 0]])
 Sz = np.array([[1, 0], [0, -1]])
+I = np.eye(2)
 
 def is_hermitian(A):
     '''Returns True if A is Hermitian, False otherwise'''
@@ -79,105 +80,126 @@ def majorana_li(ind, N):
     return prod * 1/np.sqrt(2)
 
 def majorana_left(ind, N):
-    ''' Returns the ind-th majorana fermion operator in qubit basis, using Gao and Jafferis'''
+    ''' Returns the ind-th majorana fermion operator in qubit basis, using Gao and Jafferis for *LEFT* side of chain.
+
+    NOTE: ASSUMES INDEX STARTS AT 1.
+
+    Params:
+        ind: index of the majorana operator
+        N: number of qubits
+    
+    '''
+
+    assert ind > 0, 'Index must be greater than 0.'
+    assert ind <= N, 'Index must be less than or equal to N.'
     
     if ind % 2 != 0: # odd: m = 2j - 1
         j = (ind + 1) // 2
         # loop to tensor Z tensor X j-1 times
-        if j > 1:
-            for n in range(j-1):
+        if j >= 2:
+            for n in range(j - 1):
                 if n > 0:
                     prod = np.kron(prod, Sz)
                 else:
                     prod = Sz
                 prod = np.kron(prod, Sx)
             # tensor with X tensor X
-            # print(prod.shape)
             prod = np.kron(prod, Sx)
         else:
             prod = Sx
         prod = np.kron(prod, Sx)
+
         # tensor with I tensor I for N/2 - j times
-        for _ in range(N//2 - j):
-            prod = np.kron(prod, np.eye(2))
-            prod = np.kron(prod, np.eye(2))
-    
+        if j < N//2:
+            for _ in range(N//2 - j):
+                prod = np.kron(prod, I)
+                prod = np.kron(prod, I)
+
         return prod * 1/np.sqrt(2)
 
+
     else: # even: m = 2j
-            # loop to tensor Z tensor X j-1 times
+        # loop to tensor Z tensor X j-1 times
         j = ind // 2
-        if j > 1:
+        if j >= 2:
             for n in range(j-1):
                 if n > 0:
                     prod = np.kron(prod, Sz)
                 else:
                     prod = Sz
                 prod = np.kron(prod, Sx)
-            # tensor with Y tensor X
-            prod = np.kron(prod, Sy)
+            prod = np.kron(prod, Sy)   
         else:
             prod = Sy
         prod = np.kron(prod, Sx)
+
         # tensor with I tensor I for N - m times
-        if j > 0:
+        if j < N//2:
             for _ in range(N//2 - j):
-                prod = np.kron(prod, np.eye(2))
-                prod = np.kron(prod, np.eye(2))
-        else:
-            for _ in range(N//2 - j - 1):
-                prod = np.kron(prod, np.eye(2))
-                prod = np.kron(prod, np.eye(2))
+                prod = np.kron(prod, I)
+                prod = np.kron(prod, I)
+
         return prod * 1/np.sqrt(2)
 
 def majorana_right(ind, N):
-    ''' Returns the ind-th majorana fermion operator in qubit basis, usig Gao and Jafferis'''
+    ''' Returns the ind-th majorana fermion operator in qubit basis, using Gao and Jafferis for *RIGHT* side of chain.
+
+    NOTE: ASSUMES INDEX STARTS AT 1.
+
+    Params:
+        ind: index of the majorana operator
+        N: number of qubits
+    
+    '''
+
+    assert ind > 0, 'Index must be greater than 0.'
     
     if ind % 2 != 0: # odd: m = 2j - 1
         j = (ind + 1) // 2
         # loop to tensor Z tensor X j-1 times
-        if j > 1:
+        if j >= 2:
             for n in range(j-1):
                 if n > 0:
                     prod = np.kron(prod, Sz)
                 else:
                     prod = Sz
                 prod = np.kron(prod, Sx)
-            # tensor with I tensor Y
-            prod = np.kron(prod, np.eye(2))
+
+            prod = np.kron(prod, I)
         else:
-            prod = np.eye(2)
+            prod = I
         prod = np.kron(prod, Sy)
-        # tensor with I tensor I for N/2 - m times
-        for _ in range(N//2 - j):
-            prod = np.kron(prod, np.eye(2))
-            prod = np.kron(prod, np.eye(2))
+
+        # tensor with I tensor I for N/2 - j times
+        if j < N//2:
+            for _ in range(N//2 - j):
+                prod = np.kron(prod, I)
+                prod = np.kron(prod, I)
         return prod * 1/np.sqrt(2)
 
     else: # even: m = 2j
             # loop to tensor Z tensor X j-1 times
         j = ind // 2
-        if j > 1:
+        if j >= 2:
             for n in range(j-1):
                 if n > 0:
                     prod = np.kron(prod, Sz)
                 else:
                     prod = Sz
                 prod = np.kron(prod, Sx)
-                # tensor with Y tensor X
-            prod = np.kron(prod, np.eye(2))
+      
+            # tensor with Y tensor X
+            prod = np.kron(prod, I)
         else:
-            prod = np.eye(2)
+            prod = I
         prod = np.kron(prod, Sz)
+
         # tensor with I tensor I for N - m times
-        if j > 0:
+        if j < N//2:
             for _ in range(N//2 - j):
-                prod = np.kron(prod, np.eye(2))
-                prod = np.kron(prod, np.eye(2))
-        else:
-            for _ in range(N//2 - j - 1):
-                prod = np.kron(prod, np.eye(2))
-                prod = np.kron(prod, np.eye(2))
+                prod = np.kron(prod, I)
+                prod = np.kron(prod, I)
+
         return prod * 1/np.sqrt(2)
     
 def get_dirac_left(ind, N):
@@ -234,10 +256,10 @@ def get_H(N=10, J2=2, l_r = 'left'):
     # if we restrict the indices to i < j < k < l, then we get non-hermitian matrix which contradicts Li et al
     # indices = np.array(list(combinations(range(N), 4)))
     indices = []
-    for i in range(N-3):
-        for j in range(i+1, N-2, 1):
-            for l in range(j+1, N-1, 1):
-                for k in range(l+1, N,1):
+    for i in range(1,N+1):
+        for j in range(i+1, N):
+            for l in range(j+1, N-1):
+                for k in range(l+1, N-2):
                     indices.append([i, j, l, k])
     indices = np.array(indices)
 
@@ -343,6 +365,24 @@ if __name__ == "__main__":
 
     ## comparing the majorana operators ##
     N = 8
+    # print('-------')
+    # for ind in range(1, N+1):
+    #     print(ind)
+    #     print('Majorana left: ', majorana_left(ind, N).shape)
+    #     print('Majorana right: ', majorana_right(ind, N).shape)
+    #     print('-------')
+    # print(majorana_left(10, N))
+    # print(majorana_left(10, N).shape)
+    # print(majorana_right(0, N))
+    # print(np.trace(anti_commutator(majorana_right(3, N), majorana_left(1, N))))
+
+
+
+
+
+
+
+
     # for ind in range(N):
     #     print(majorana_left(ind, N).shape)
     #     print(majorana_right(ind, N).shape)
@@ -359,6 +399,8 @@ if __name__ == "__main__":
     print('H_r: ')
     print_matrix(H_r, N=N, l_r = 'Right', ts=ts_r)
     print('Is H_r hermitian? ', is_hermitian(H_r))
+
+    # print(get_dirac_left(0, N))
 
 
     # print('Li et al: ')
