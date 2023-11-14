@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import math
 import matplotlib.pyplot as plt
@@ -14,6 +15,12 @@ def is_hermitian(A):
     '''Returns True if A is Hermitian, False otherwise'''
     return np.allclose(A, A.conj().T)
 
+def is_unitary(A, tol=1e-10):
+    '''Returns True if A is unitary, False otherwise'''
+    A_dagger = A.conj().T
+    return np.allclose(np.eye(len(A)), A @ A_dagger, atol=tol) and np.allclose(np.eye(len(A)), A_dagger @ A, atol=tol)
+
+
 def anti_commutator(A, B):
     return A @ B + B @ A
 
@@ -21,17 +28,17 @@ def is_zero(mat):
         '''Returns True if the matrix is all zeros.'''
         return np.isclose(mat, np.zeros((2**N, 2**N)), atol = 1e-10).all()
 
-def print_matrix(A, l_r= None, ts = None, N=10,display=False, is_SYK = True, other_name = None):
+def print_matrix(A, N=10, is_SYK = True, other_name = None, l_r= None, ts = None, display=False):
     '''Prints the matrix.
 
     Params:
         A: matrix to print
+        N: number of qubits
+        is_SYK: True if the matrix is a SYK Hamiltonian, False otherwise
+        other_name: name of the matrix if it is not a SYK Hamiltonian
         l_r: 'left' or 'right' or 'li' depending on whether the majorana operators are on the left or right side of the chain or instead using li's notation
         ts: timestamp of when the matrix was saved
-        N: number of qubits
-        display: if true, displays the matrix
-        is_SYK: if true, saves assuming SYK. Otherwise, saves in directory corresponding to the Hamiltonian type (e.g. H_10)
-        other_name: optional string param to save the matrix with a different name
+        display: if True, displays the matrix
     
     
     '''
@@ -55,8 +62,10 @@ def print_matrix(A, l_r= None, ts = None, N=10,display=False, is_SYK = True, oth
     fig.colorbar(im2, ax=ax[1])
     ax[0].set_title('Real part')
     ax[1].set_title('Imaginary part')
-
-    plt.suptitle(f'N = {N}, {l_r} SYK Hamiltonian')
+    if is_SYK:
+        plt.suptitle(f'N = {N}, {l_r} SYK Hamiltonian')
+    else:
+        plt.suptitle(f'N = {N}, {other_name}')
     # fig.subplots_adjust(wspace=0.1)  # Adjust this value as needed
     plt.tight_layout()
 
@@ -246,7 +255,18 @@ def get_dirac_right(i, N):
 
 def time_ev(H, t):
     '''Returns the time evolution operator for the Hamiltonian H at time t.'''
-    return np.exp(-1j * H * t)
+    hbar = 1
+    # decompose H into eigenvalues and eigenvectors
+    e_vals, e_vecs = np.linalg.eig(H)
+    print(e_vals)
+    print(e_vecs)
+    # get the time evolution operator
+    U = np.zeros((len(H), len(H)), dtype=np.complex128)
+    for i in range(len(H)):
+        U += np.exp(-1j * e_vals[i] * t / hbar) * np.outer(e_vecs[:, i], e_vecs[:, i].conj())
+
+    print('Is U unitary? ', is_unitary(U))
+    return U
 
 def get_product_matrices(indices, N, l_r = 'left'):
     '''Returns the product of the majorana operators corresponding to the indices in the list indices.
