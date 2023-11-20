@@ -18,8 +18,12 @@ def is_hermitian(A):
 def is_unitary(A, tol=1e-10):
     '''Returns True if A is unitary, False otherwise'''
     A_dagger = A.conj().T
-    return np.allclose(np.eye(len(A)), A @ A_dagger, atol=tol) and np.allclose(np.eye(len(A)), A_dagger @ A, atol=tol)
-
+    if np.allclose(np.eye(len(A)), A @ A_dagger, atol=tol) and np.allclose(np.eye(len(A)), A_dagger @ A, atol=tol):
+        return True
+    else:
+        print('A @ A_dagger: ', A @ A_dagger)
+        loss = np.linalg.norm(A @ A_dagger - np.eye(len(A)))
+        return 'False. Loss: %.3g'%loss
 
 def anti_commutator(A, B):
     return A @ B + B @ A
@@ -241,7 +245,7 @@ def get_dirac_left(j, N):
     m_left_0 = majorana_left(j*2-1, N)
     m_left_1 = majorana_left(j*2, N)
 
-    return 1/np.sqrt(2) * (m_left_0 + 1j * m_left_1)
+    return np.array(1/np.sqrt(2) * (m_left_0 + 1j * m_left_1))
 
 def get_dirac_right(i, N):
     '''Gets the right dirac operator corresponding to the ind-th majorana operator'''
@@ -251,19 +255,66 @@ def get_dirac_right(i, N):
     m_right_0 = majorana_right(i*2-1, N)
     m_right_1 = majorana_right(i*2, N)
 
-    return 1/np.sqrt(2) * (m_right_0 + 1j * m_right_1)
+    return np.array(1/np.sqrt(2) * (m_right_0 + 1j * m_right_1))
 
 def time_ev(H, t):
+    '''Calculates time evolution operator by diagonalizing H'''
+    hbar = 1
+    # decompose H into eigenvalues and eigenvectors
+    e_vals, e_vecs = np.linalg.eig(H)
+    print('Is H hermitian? ', is_hermitian(H))
+
+    # calculate the exponential of the diagonal matrix of eigenvalues
+    U_diag = np.diag(np.exp(-1j * e_vals * t / hbar))
+
+    # reconstruct U in the original basis
+    U = np.dot(e_vecs, np.dot(U_diag, np.linalg.inv(e_vecs)))
+
+    print('Is U unitary? ', is_unitary(U))
+
+    U = np.array(U)
+    return U
+
+
+def time_ev_op(H, t):
     '''Returns the time evolution operator for the Hamiltonian H at time t.'''
     hbar = 1
     # decompose H into eigenvalues and eigenvectors
     e_vals, e_vecs = np.linalg.eig(H)
-    print(e_vals)
-    print(e_vecs)
+    print('is H hermitian? ', is_hermitian(H))
+    # are evecs orthonormal?
+    print('Are evecs orthonormal? ', np.allclose(np.eye(len(H)), e_vecs @ e_vecs.conj().T))
+
+    # normalize the eigenvectors
+    for i in range(len(H)):
+        e_vecs[:, i] = e_vecs[:, i] / np.sqrt(np.linalg.norm(e_vecs[:, i].conj().T @ e_vecs[:, i]))
+        # e_vecs[:, i] = e_vecs[:, i] / np.sqrt(len(H))
+    print('Are evecs normalized? ', np.allclose(np.eye(len(H)), e_vecs.conj().T @ e_vecs, atol=1e-10))
+
+    print_matrix(e_vecs, N=len(H), is_SYK=False, other_name='evecs')
+
+    print(e_vecs.shape)
+    print(np.linalg.norm(e_vecs[:, 0]))
+
+    print('Are there non real elements in e_vals? ', np.any(np.imag(e_vals)))
+    print(np.linalg.norm(e_vecs[:, 0]))
+    print(np.linalg.norm(e_vecs[:, 0].conj().T))
+
+
+    # check eigenvectors are orthongonal. take rank of matrix where the evecs are columns
+    print('Are evecs orthogonal? ', np.linalg.matrix_rank(e_vecs.conj().T @ e_vecs))
+    print('Are evecs normalized? ', np.allclose(np.eye(len(e_vecs)), (e_vecs.conj().T @ e_vecs), atol=1e-10))
+
+    print('outer prod mat', e_vecs.conj().T @ e_vecs)
+    print_matrix(e_vecs.conj().T @ e_vecs, N=len(H), is_SYK=False, other_name='evecs_outer_prod')
+    print(np.trace(e_vecs.conj().T @ e_vecs))
+
     # get the time evolution operator
     U = np.zeros((len(H), len(H)), dtype=np.complex128)
     for i in range(len(H)):
-        U += np.exp(-1j * e_vals[i] * t / hbar) * np.outer(e_vecs[:, i], e_vecs[:, i].conj())
+        # each term is v v^\dagger weighted by e^{-i E_i t / hbar}
+        proj = np.outer(e_vecs[:, i], e_vecs[:, i].conj().T)
+        U += np.exp(-1j * e_vals[i] * t / hbar) * proj
 
     print('Is U unitary? ', is_unitary(U))
     return U
@@ -295,7 +346,7 @@ def get_product_matrices(indices, N, l_r = 'left'):
     return product
 
 def get_H(N=10, J2=2, dirac=False, l_r = 'left'):
-    '''Returns the SYK Hamiltonian for N qubits.
+    '''Returns the L, R, SYK Hamiltonian for N qubits and the timestamp of creation.
 
     Params:
         N: number of qubits
@@ -346,6 +397,8 @@ def get_H(N=10, J2=2, dirac=False, l_r = 'left'):
             os.makedirs(f'ham/H_{N}')
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         np.save(f'ham/H_{N}/H_{N}_{l_r}_{timestamp}.npy', H)
+        H = np.array(H)
+        H = H.reshape((2**N, 2**N))
         return H, timestamp
     else:
         prod_left = np.array([get_product_matrices(index_ls, N, 'left')  for index_ls in indices])
@@ -438,10 +491,19 @@ if __name__ == "__main__":
     ## comparing the majorana operators ##
     N = 10
     # get_H(N, dirac=True)
-    n_l = 3
-    n_r = 3
-    print_matrix(get_dirac_left(n_l, N), N, is_SYK=False, other_name=f'dirac_left_{n_l}')
-    print_matrix(get_dirac_right(n_r, N), N, is_SYK=False, other_name=f'dirac_right_{n_r}')
+    # n_l = 3
+    # n_r = 3
+    # print_matrix(get_dirac_left(n_l, N), N, is_SYK=False, other_name=f'dirac_left_{n_l}')
+    # print_matrix(get_dirac_right(n_r, N), N, is_SYK=False, other_name=f'dirac_right_{n_r}')
+
+    # time_ev(get_H(N)[0], 1)
+    # mat = get_H(N)[0]
+    # time_ev(mat, 1)
+    # time_ev_op(mat, 1)
+    # print('time evol op: ', time_ev(get_H(N)[0], 1).shape)
+    # print('dirac left: ', get_dirac_left(1, N).shape)
+    print('prod', time_ev(get_H(N)[0], 1) @ get_dirac_left(1, N))
+    # print('Majorana left: ', majorana_left(1, N).shape)
     
 
 

@@ -142,19 +142,28 @@ def get_rho_TR(t, j, N, H=None, l_r = 'left', J2 = 4,beta=4, nt0 = -2.8):
     '''
 
     if H is None:
-        H = get_H(N, J2, l_r)
+        H = get_H(N, J2)[0]
+        H = np.array(H)
+        print('H', H)
 
     TFD = get_TFD(H, beta)
 
-    chi_l = time_ev(get_dirac_left(j, N), -nt0) # time-evolve the left fermion by -t0
+    # get time evolution operator
+    U_nt0 = time_ev(H,-nt0)
+    U_t = time_ev(H,t)
+
+    chi_l = U_nt0 @ get_dirac_left(j, N),  # time-evolve the left fermion by -t0
+    chi_l =chi_l[0]
+    print('chi_l', chi_l)
     chi_l_dagger = chi_l.conj().T
-    chi_r = time_ev(get_dirac_right(j, N), t) # time-evolve the right fermion by t
+    chi_r = U_t @ get_dirac_right(j, N) # time-evolve the right fermion by t
+    chi_r = chi_r.reshape(2**N, 2**N)
     chi_r_dagger = chi_r.conj().T
 
     U = get_U(N)
     U_dagger = U.conj().T
 
-    # print('sample operator', chi_l @ chi_l_dagger)
+    print('sample operator', chi_l @ chi_l_dagger)
 
     # chi_l @ chi_l_dagger @ U_dagger @ chi_r @ chi_r_dagger @ U @ chi_l @ chi_l_dagger
 
@@ -192,11 +201,16 @@ if __name__ == '__main__':
     H_l = np.load('ham/H_10/H_10_right_20231114-020214.npy', allow_pickle=True)
     H_r = np.load('ham/H_10/H_10_right_20231114-020214.npy', allow_pickle=True)
     H = H_l + H_r
+
+    # print(get_rho_TR(5, 1, 10, nt0=2, H=None))
+    print(get_IRT(5, 1, 10, nt0=2, H=None))
     
-    print_matrix(time_ev(H, 1), N = 10, is_SYK=False, other_name='U(t=1)')
+    # print_matrix(time_ev(H_l, 1), N = 10, is_SYK=False, other_name='U(t=1)')
+    # print(time_ev(np.kron(Sx, Sx) + np.kron(Sy, Sy) + np.kron(Sz, Sz), 2))
+    # print(time_ev(Sx, 1))
     
 
-    # print(get_IRT(1, 1, 10, nt0=2, H=H))
+    # print(get_IRT(1, 1, 10, nt0=2, H=H_l))
     # print(np.linalg.eigvals(get_rho_TR(1, 1, 10, nt0=2, H=H)))
     # TFD = is_valid_rho(get_TFD(H))
     # print_matrix(get_TFD(H), N=10, is_SYK=False, other_name='TFD')
