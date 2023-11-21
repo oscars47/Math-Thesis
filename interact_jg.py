@@ -33,10 +33,6 @@ def is_valid_rho(rho, verbose=True):
     if not(np.all(np.isclose(rho,adjoint(rho), rtol=tolerance))):
         if verbose: print(f'rho is not Hermitian')
         return False
-    # check if trace 1, within tolerance. can use param rtol to change tolerance
-    if not(np.isclose(np.trace(rho), 1, tolerance)):
-        if verbose: print('rho trace is not 1', np.trace(rho))
-        return False
     # check if positive semidefinite
     eig_val = np.linalg.eigvals(rho)
     if not(np.all(np.greater_equal(eig_val,np.zeros(len(eig_val))) | np.isclose(eig_val,np.zeros(len(eig_val)), rtol=tolerance))):
@@ -49,6 +45,10 @@ def is_valid_rho(rho, verbose=True):
             print('nan', np.isnan(rho))
             print('inf', np.isinf(rho))
             print(rho)
+        return False
+    # check if trace 1, within tolerance. can use param rtol to change tolerance
+    if not(np.isclose(np.trace(rho), 1, tolerance)):
+        if verbose: print('rho trace is not 1', np.trace(rho))
         return False
     return True
 
@@ -120,15 +120,100 @@ def get_TFD(H, beta=4):
     
     # get the eigenvalues and eigenvectors of the Hamiltonian
     eig_val, eig_vec = np.linalg.eigh(H)
+    print('len eig_val', len(eig_val))
+    # print('first 10 eig val', eig_val[:10])
+    N = int(np.log2(H.shape[0]))
     # get the partition function
-    Z = np.sum(np.exp(-beta * eig_val))
+    Z = np.sqrt(np.sum(np.exp(-beta * eig_val/2)**2))
     # get the density matrix
-    rho = np.zeros((H.shape[0], H.shape[0]), dtype=complex)
-    for i in range(len(eig_val)):
-        rho += np.exp(-beta * eig_val[i]) / Z * np.outer(eig_vec[:, i], eig_vec[:, i].conj())
-    return rho
+    TFD = np.exp(-beta * eig_val /2) / Z 
+    print(TFD)
+    print(np.linalg.norm(TFD))
+    TFD = TFD.reshape(2**N, 1)
+    rho_TFD = TFD @ TFD.conj().T
+    print('shape', rho_TFD.shape)
+    print('is valid rho?', is_valid_rho(rho_TFD))
+    return rho_TFD
 
-def get_rho_TR(t, j, N, H=None, l_r = 'left', J2 = 4,beta=4, nt0 = -2.8):
+def get_rho_TR(t, j_1 = 1, j_2 = 2, N=10, H=None, l_r = 'left', J2 = 4,beta=4, nt0 = -2.8):
+    '''Define the non-trivial correlation functions and combine to get reduced density matrix.
+    Params:
+        t: time at which to evaluate the reduced density matrix
+        j_1: index of the first majorana
+        j_2: index of the second majorana
+        N: number of qubits
+        H: Hamiltonian
+        l_r: left or right fermion
+        J2: J^2 coupling strength
+        beta: inverse temperature
+        nt0: negative of initial time; assuming fixed injection time
+    '''
+
+    if H is None:
+        H = get_H(N, J2)[0]
+        H = np.array(H)
+        print('H', H)
+
+    TFD = get_TFD(H, beta)
+
+    # get time evolution operator
+    U_nt0 = time_ev(H,-nt0)
+    U_t = time_ev(H,t)
+
+    U = get_U(N)
+    U_dagger = adjoint(U)
+
+    # get right fermion
+    psi_1_r = U_t @ majorana_right(j_1, N) # time-evolve the right fermion by t
+    psi_1_r = psi_1_r.reshape(2**N, 2**N)
+    psi_1_r_dagger = adjoint(psi_1_r)
+    psi_2_r = U_t @ majorana_right(j_2, N) # time-evolve the right fermion by t
+    psi_2_r = psi_2_r.reshape(2**N, 2**N)
+    psi_2_r_dagger = adjoint(psi_2_r)
+
+    # get left fermion
+    psi_1_l = U_nt0 @ majorana_left(j_1, N),  # time-evolve the left fermion by -t0
+    psi_1_l = np.array(psi_1_l[0])
+    psi_1_l = psi_1_l.reshape(2**N, 2**N)
+    psi_1_l_dagger = adjoint(psi_1_l)
+    psi_2_l = U_nt0 @ majorana_left(j_2, N),  # time-evolve the left fermion by -t0
+    psi_2_l = np.array(psi_2_l[0])
+    psi_2_l = psi_2_l.reshape(2**N, 2**N)
+    psi_2_l_dagger = adjoint(psi_2_l)
+
+    # get rho_11
+    rho_11 = .5 * (1 - np.trace(
+        anti_commutator(psi_1_l, commutator(psi_2_l, psi_1_l @ U_dagger @ psi_1_r @ psi_2_r @ U)
+                        ) @ TFD
+    ))
+    # get rest of diagonals
+    rho_22 = 1 - rho_11
+    rho_33 = 1 - rho_11
+    rho_44 = 1 - rho_22
+
+    # get off diagonal
+    rho_14 = .5 * np.trace(
+        anti_commutator(psi_1_l, U_dagger @ psi_1_r @ U)  @ TFD
+    ) - np.trace(
+        anti_commutator(psi_2_l, psi_1_l @ U_dagger @ psi_2_r @ U @ psi_1_l) @ TFD
+    )
+
+    # combine to get density matrix
+    rho_TR = .5*np.array([[rho_11, 0, 0, rho_14], [0, rho_22, 0, 0], [0, 0, rho_33, 0], [rho_14.conj(), 0, 0, rho_44]])
+
+    print('is rho_TR valid?', is_valid_rho(rho_TR))
+    return rho_TR
+
+
+
+
+
+
+
+
+
+
+def get_rho_TR_old(t, j, N, H=None, l_r = 'left', J2 = 4,beta=4, nt0 = -2.8):
     '''Define the non-trivial correlation functions and combine to get reduced density matrix.
     Params:
         t: time at which to evaluate the reduced density matrix
@@ -163,9 +248,13 @@ def get_rho_TR(t, j, N, H=None, l_r = 'left', J2 = 4,beta=4, nt0 = -2.8):
     U = get_U(N)
     U_dagger = U.conj().T
 
-    print('sample operator', chi_l @ chi_l_dagger)
-
     # chi_l @ chi_l_dagger @ U_dagger @ chi_r @ chi_r_dagger @ U @ chi_l @ chi_l_dagger
+
+    print('-------')
+
+    print('first expec', np.trace(chi_l @ chi_l_dagger @ U_dagger @ chi_r @ chi_r_dagger @ U @ chi_l @ chi_l_dagger @ TFD))
+
+    print('-------')
 
     ## using the direct forms of chi; not sure if this is correct -- (not density matrices!)
     rho_11 = np.trace(chi_l @ chi_l_dagger @ U_dagger @ chi_r @ chi_r_dagger @ U @ chi_l @ chi_l_dagger @ TFD) + np.trace(chi_l_dagger @ U_dagger @ chi_r @ chi_r_dagger @ U @ chi_l @ TFD)
@@ -182,17 +271,29 @@ def get_rho_TR(t, j, N, H=None, l_r = 'left', J2 = 4,beta=4, nt0 = -2.8):
 
     # construct the density matrix
     rho_TR = .5 * np.array([[rho_11, 0, 0, rho_14], [0, rho_22, rho_23, 0], [0, rho_23.conj(), rho_33, 0], [rho_14.conj(), 0, 0, rho_44]])
+
+    print('is rho_TR valid?', is_valid_rho(rho_TR))
     return rho_TR
 
 def S(rho):
+    print('rho', rho)
     '''Returns the von Neumann entropy of the density matrix rho'''
-    return -np.trace(rho @ np.log(rho))
+
+    # check valid density matrix
+    if not(is_valid_rho(rho)):
+        raise Exception('rho is not a valid density matrix')
+
+    # diagonalize rho
+    eig_val, eig_vec = np.linalg.eigh(rho)
+    # get the entropy
+    return -np.sum(eig_val * np.log2(eig_val, where=eig_val>0))
 
 def get_IRT(t, j, N, H=None, l_r = 'left', J2 = 4,beta=4, nt0 = -2.8):
     '''Computes the mutual information of the RT state'''
     rho_TR = get_rho_TR(t, j, N, H, l_r, J2, beta, nt0)
     print(rho_TR)
     rho_TR = rho_TR.reshape(2, 2, 2, 2)
+    print('reshape', rho_TR)
     rho_T = np.trace(rho_TR, axis1=0, axis2=1)
     rho_R = np.trace(rho_TR, axis1=2, axis2=3)
     return S(rho_T) + S(rho_R) - S(rho_TR)
@@ -204,6 +305,7 @@ if __name__ == '__main__':
 
     # print(get_rho_TR(5, 1, 10, nt0=2, H=None))
     print(get_IRT(5, 1, 10, nt0=2, H=None))
+    # get_TFD(H=H)
     
     # print_matrix(time_ev(H_l, 1), N = 10, is_SYK=False, other_name='U(t=1)')
     # print(time_ev(np.kron(Sx, Sx) + np.kron(Sy, Sy) + np.kron(Sz, Sz), 2))
