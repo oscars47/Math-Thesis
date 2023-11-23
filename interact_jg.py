@@ -1,6 +1,7 @@
 # file to implement the wormhole protocol using the analytic expression derived in Jafferis and Gao et al
 import os
 import numpy as np
+import scipy
 from syk import * # my code implementing their majorana operators and Hamiltonians
 
 # projectors #
@@ -56,7 +57,7 @@ def is_valid_rho(rho, verbose=True):
 def get_Uj(j,N,mu):
     # only sum over odd since otherwise projectors won't commute
     if j % 2 == 0:
-        j_term = np.kron(Px_p, np.exp(1j*mu*Sz / 2)) + np.kron(Px_m, np.exp(-1j*mu*Sz / 2))
+        j_term = np.kron(Px_p, scipy.linalg.expm(1j*mu*Sz / 2)) + np.kron(Px_m, scipy.linalg.expm(-1j*mu*Sz / 2))
         
         # put inside tensor product
         j = j // 2
@@ -82,7 +83,7 @@ def get_Uj(j,N,mu):
                 prod = np.kron(prod, np.eye(2))
         return prod
     else:
-        j_term = np.kron(Py_p, np.exp(1j*mu*Sy / 2)) + np.kron(Py_m, np.exp(-1j*mu*Sy / 2))
+        j_term = np.kron(Py_p, scipy.linalg.expm(1j*mu*Sy / 2)) + np.kron(Py_m, scipy.linalg.expm(-1j*mu*Sy / 2))
 
         j = (j + 1) // 2
         # loop to tensor Z tensor X j-1 times
@@ -117,6 +118,7 @@ def get_U(N, mu=-12):
 
 def get_TFD(H, beta=4):
     '''Returns the density matrix for the thermal state of the Hamiltonian H at inverse temperature beta'''
+    print(H)
     
     # get the eigenvalues and eigenvectors of the Hamiltonian
     eig_val, eig_vec = np.linalg.eigh(H)
@@ -135,7 +137,7 @@ def get_TFD(H, beta=4):
     print('is valid rho?', is_valid_rho(rho_TFD))
     return rho_TFD
 
-def get_rho_TR(t, j_1 = 1, j_2 = 2, N=10, H=None, l_r = 'left', J2 = 4,beta=4, nt0 = -2.8):
+def get_rho_TR(t, j_1 = 1, j_2 = 2, N=10, H=None, J2 = 4,beta=4, nt0 = -2.8):
     '''Define the non-trivial correlation functions and combine to get reduced density matrix.
     Params:
         t: time at which to evaluate the reduced density matrix
@@ -150,11 +152,10 @@ def get_rho_TR(t, j_1 = 1, j_2 = 2, N=10, H=None, l_r = 'left', J2 = 4,beta=4, n
     '''
 
     if H is None:
-        H = get_H(N, J2)[0]
-        H = np.array(H)
-        print('H', H)
+        H_ls = get_H(N, J2)
+        H = np.array(H_ls[0] + H_ls[1])
 
-    TFD = get_TFD(H, beta)
+    TFD = get_TFD(H=H, beta=beta)
 
     # get time evolution operator
     U_nt0 = time_ev(H,-nt0)
@@ -204,16 +205,7 @@ def get_rho_TR(t, j_1 = 1, j_2 = 2, N=10, H=None, l_r = 'left', J2 = 4,beta=4, n
     print('is rho_TR valid?', is_valid_rho(rho_TR))
     return rho_TR
 
-
-
-
-
-
-
-
-
-
-def get_rho_TR_old(t, j, N, H=None, l_r = 'left', J2 = 4,beta=4, nt0 = -2.8):
+def get_rho_TR_old(t, j, N, H=None, J2 = 4,beta=4, nt0 = -2.8):
     '''Define the non-trivial correlation functions and combine to get reduced density matrix.
     Params:
         t: time at which to evaluate the reduced density matrix
@@ -288,9 +280,9 @@ def S(rho):
     # get the entropy
     return -np.sum(eig_val * np.log2(eig_val, where=eig_val>0))
 
-def get_IRT(t, j, N, H=None, l_r = 'left', J2 = 4,beta=4, nt0 = -2.8):
+def get_IRT(t, j_1=1, j_2=2, N=10, H=None, J2 = 4,beta=4, nt0 = -2.8):
     '''Computes the mutual information of the RT state'''
-    rho_TR = get_rho_TR(t, j, N, H, l_r, J2, beta, nt0)
+    rho_TR = get_rho_TR(t=t, j_1=j_1, j_2 = j_2, N=N, H=H, J2 = J2, beta=beta, nt0 = nt0)
     print(rho_TR)
     rho_TR = rho_TR.reshape(2, 2, 2, 2)
     print('reshape', rho_TR)
@@ -303,9 +295,9 @@ if __name__ == '__main__':
     H_r = np.load('ham/H_10/H_10_right_20231114-020214.npy', allow_pickle=True)
     H = H_l + H_r
 
-    # print(get_rho_TR(5, 1, 10, nt0=2, H=None))
-    print(get_IRT(5, 1, 10, nt0=2, H=None))
+    # print(get_IRT(t=1, H=H))
     # get_TFD(H=H)
+    print(get_rho_TR(2, H=H))
     
     # print_matrix(time_ev(H_l, 1), N = 10, is_SYK=False, other_name='U(t=1)')
     # print(time_ev(np.kron(Sx, Sx) + np.kron(Sy, Sy) + np.kron(Sz, Sz), 2))

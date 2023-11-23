@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import scipy
 import math
 import matplotlib.pyplot as plt
 import datetime
@@ -25,7 +26,12 @@ def is_unitary(A, tol=1e-10):
         loss = np.linalg.norm(A @ A_dagger - np.eye(len(A)))
         return 'False. Loss: %.3g'%loss
 
+def commutator(A, B):
+    '''Returns the commutator of A and B, i.e. AB - BA'''
+    return A @ B - B @ A
+
 def anti_commutator(A, B):
+    '''Returns the anti-commutator of A and B, i.e. AB + BA'''
     return A @ B + B @ A
 
 def is_zero(mat):
@@ -261,20 +267,10 @@ def time_ev(H, t):
     '''Calculates time evolution operator by diagonalizing H'''
     hbar = 1
     # decompose H into eigenvalues and eigenvectors
-    e_vals, e_vecs = np.linalg.eig(H)
-    print('Is H hermitian? ', is_hermitian(H))
-
-    # calculate the exponential of the diagonal matrix of eigenvalues
-    U_diag = np.diag(np.exp(-1j * e_vals * t / hbar))
-
-    # reconstruct U in the original basis
-    U = np.dot(e_vecs, np.dot(U_diag, np.linalg.inv(e_vecs)))
-
+    U = scipy.linalg.expm(-1j * H * t / hbar)
     print('Is U unitary? ', is_unitary(U))
-
     U = np.array(U)
     return U
-
 
 def time_ev_op(H, t):
     '''Returns the time evolution operator for the Hamiltonian H at time t.'''
