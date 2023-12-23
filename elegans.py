@@ -6,6 +6,7 @@ from oscars_toolbox.trabbit import trabbit
 # ------ define gates ------ #
 # jones matrices for single qubit rotation; see Simon and Mukunda that show HQQ = SU(2)
 def R(alpha): return np.matrix([[np.cos(alpha), np.sin(alpha)], [-np.sin(alpha), np.cos(alpha)]])
+def Rp(alpha): return np.matrix([[np.cos(alpha), np.sin(alpha)], [np.sin(alpha), np.cos(alpha)]])
 def H(theta): return np.matrix([[np.cos(2*theta), np.sin(2*theta)], [np.sin(2*theta), -np.cos(2*theta)]])
 def Q(alpha): return R(alpha) @ np.matrix(np.diag([np.exp(np.pi / 4 * 1j), np.exp(-np.pi / 4 * 1j)])) @ R(-alpha)
 def Rz(theta): return np.matrix(np.diag([np.exp(-1j * theta / 2), np.exp(1j * theta / 2)]))
@@ -50,7 +51,7 @@ def CNOT(N, i, j, theta):
             gate1 = np.kron(gate1, P1)
         elif k == j: # target part
             # gate1 = np.kron(gate1, (H(theta1/2) @ Q(theta2/2) @ Q(theta3/2)) @ X @ (H(-theta1/2) @ Q(-theta2/2) @ Q(-theta3/2))) # if control is |0>, then target is identity
-            gate1 = np.kron(gate1, Rz(theta/2) @ X @ Rz(-theta/2))
+            gate1 = np.kron(gate1, Rp(theta))
         else:
             gate1 = np.kron(gate1, I2)
 
@@ -143,7 +144,7 @@ def random_circuit(n, d, I2_prob = 0.2, H_prob = 0.2, Q_prob = 0.2, HQQ_prob = 0
 
 if __name__ == '__main__':
     N = 2
-    print(np.round(CNOT(N, 0, 1, 0, np.pi/2, np.pi/2), 3))
+    print(np.round(CNOT(N, 0, 1, 0)))
 
 
 
