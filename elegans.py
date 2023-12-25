@@ -64,49 +64,79 @@ def CNOT(N, i, j, theta):
     return gate
 
 # ------ define circuit ------ #
-def get_circuit(n, params):
-    '''Returns a parametrized circuit that can approximate any unitary on n qubits.'''
+def get_circuit(n, params, config=0):
+    '''Returns a parametrized circuit that can approximate any unitary on n qubits.
+
+    Params:
+        n: number of qubits
+        params: parameters for the circuit
+        config: configuration of the circuit. 0 is only HQQ, 1 is CNOT + HQQ, 2 is HQQ + CNOT + HQQ
+    '''
+
+    def apply_HQQ(HQQ_params, circuit):
+        # loop through all qubits
+        for i in range(n):
+            # apply HQQ at ith qubit, I2 everywhere else
+            # build up that term and then multiply to the circuit
+            term = 1
+            for j in range(n):
+                if j == i:
+                    term = np.kron(term, H(HQQ_params[i, 0]) @ Q(HQQ_params[i, 1]) @ Q(HQQ_params[i, 2]))
+                else:
+                    term = np.kron(term, I2)
+            circuit = circuit @ term
+
+        return circuit
+
+    def apply_CNOT(CNOT_params, circuit):
+        # loop through all qubits as control
+        for i in range(n):
+            # loop through all qubits as target
+            for j in range(n):
+                # apply CNOT, which in general is defined: CNOT = |0><0| x I + |1><1| x X. we extend it 
+                if i < j:
+                    circuit = circuit @ CNOT(n, i, j, CNOT_params[i, j])
+                elif i > j:
+                    circuit = circuit @ CNOT(n, j, i, CNOT_params[i, j])
+
+        return circuit
+
+    assert config in [0, 1, 2], f'config must be 0, 1, or 2. you have = {config}'
+
     # first apply Had to all qubits
     circuit = Had
     for _ in range(n-1):
         circuit = np.kron(circuit, Had)
 
-    # apply CNOT gates on all pairs of qubits
-    CNOT_params = params[:n**2].reshape((n, n))
-    # loop through all qubits as control
-    for i in range(n):
-        # loop through all qubits as target
-        for j in range(n):
-            # apply CNOT, which in general is defined: CNOT = |0><0| x I + |1><1| x X. we extend it 
-            if i < j:
-                circuit = circuit @ CNOT(n, i, j, CNOT_params[i, j])
-            elif i > j:
-                circuit = circuit @ CNOT(n, j, i, CNOT_params[i, j])
+    if config == 0:
+        # apply HQQ gates on all qubits
+        HQQ_params = params.reshape((n, 3))
+        circuit = apply_HQQ(HQQ_params, circuit)
+   
+    elif config == 1:
+        CNOT_params = params[:n**2].reshape((n, n))      
+        HQQ_params = params[n**2:].reshape((n, 3))
+        circuit = apply_CNOT(CNOT_params, circuit)
+        circuit = apply_HQQ(HQQ_params, circuit)
 
-
-    # apply HQQ gates on all qubits
-    HQQ_params = params[n**2:].reshape((n, 3))
-    # loop through all qubits
-    for i in range(n):
-        # apply HQQ at ith qubit, I2 everywhere else
-        # build up that term and then multiply to the circuit
-        term = 1
-        for j in range(n):
-            if j == i:
-                term = np.kron(term, H(HQQ_params[i, 0]) @ Q(HQQ_params[i, 1]) @ Q(HQQ_params[i, 2]))
-            else:
-                term = np.kron(term, I2)
-        circuit = circuit @ term
+    elif config == 2:
+        HQQ_params = params[:3*n].reshape((n, 3))
+        CNOT_params = params[3*n:3*n+n**2].reshape((n, n))
+        HQQ_params2 = params[3*n+n**2:].reshape((n, 3))
+        circuit = apply_HQQ(HQQ_params, circuit)
+        circuit = apply_CNOT(CNOT_params, circuit)
+        circuit = apply_HQQ(HQQ_params2, circuit)
 
     return circuit
 
 # ------ define cost function ------ #
-def loss_func(params, target):
+def loss_func(params, target, config):
     '''Returns the loss function for a given target unitary.'''
     n = int(np.log2(target.shape[0]))
-    circuit = get_circuit(n, params)
-    # return np.linalg.norm(circuit - target)
-    return 1-np.abs(np.trace(circuit @ target.conj().T))
+    circuit = get_circuit(n, params, config)
+    return np.linalg.norm(circuit - target)
+    # print(np.sqrt(np.abs(np.trace(circuit @ target.conj().T))**2))
+    # return 1-np.sqrt(np.abs(np.trace(circuit @ target.conj().T))**2)
 
 def random_func(size=1): 
     rand = np.random.uniform(0, 2*np.pi, size=size)
@@ -115,14 +145,21 @@ def random_func(size=1):
     else:
         return rand
 
-def find_params(target):
+def find_params(target, config=0):
     '''Returns the parameters that minimize the loss function for a given target unitary.'''
     # initialize parameters
     n = int(np.log2(target.shape[0]))
-    bounds = [(0, 2*np.pi)] * (n**2 + 3*n)
     # minimize loss function
-    loss_func_param = lambda params: loss_func(params, target)
-    random_gen = partial(random_func, size=n**2+3*n)
+    loss_func_param = lambda params: loss_func(params, target, config)
+    if config == 0:
+        random_gen = partial(random_func, size=3*n)
+        bounds = [(0, 2*np.pi)] * 3*n
+    elif config == 1:
+        random_gen = partial(random_func, size=n**2+3*n)
+        bounds = [(0, 2*np.pi)] * (n**2 + 3*n)
+    elif config == 2:
+        random_gen = partial(random_func, size=3*n+n**2+3*n)
+        bounds = [(0, 2*np.pi)] * (3*n + n**2 + 3*n)
     
     return trabbit(loss_func=loss_func_param, random_gen=random_gen, bounds=bounds, alpha=1, temperature=.01, verbose=True)
 
@@ -134,10 +171,13 @@ def random_circuit(n, d, I2_prob = 0.2, H_prob = 0.2, Q_prob = 0.2, HQQ_prob = 0
     for _ in range(n-1):
         unitary = np.kron(unitary, Had)
 
+    p = np.array([I2_prob, H_prob, Q_prob, HQQ_prob, CNOT_prob])
+    p /= np.sum(p)
+
     # loop through all layers
     for _ in range(d):
         # choose which gates to apply; if CNOT, chose random control and target qubits
-        gates = np.random.choice(['I2', 'H', 'Q', 'HQQ', 'CNOT'], size=n, p=[I2_prob, H_prob, Q_prob, HQQ_prob, CNOT_prob])
+        gates = np.random.choice(['I2', 'H', 'Q', 'HQQ', 'CNOT'], size=n, p=p)
         term = np.array([1])
         # initialize list of CNOT gates to apply at the end
         CNOT_gates = []
@@ -263,9 +303,9 @@ def compare_matrices(A, B, title=None, savefig=False):
 if __name__ == '__main__':
     N = 5
     d = 5
-    circuit = random_circuit(N, d)
+    circuit = random_circuit(N, d, CNOT_prob=0)
 
-    x_best, loss_best = find_params(circuit)
+    x_best, loss_best = find_params(circuit, config=2)
     print(x_best)
     print(loss_best)
 
