@@ -1,12 +1,14 @@
 # file to implement the q-elegans model as a circuit which should be able to arbitrarily approximate any circuit
-
 import numpy as np
+from datetime import datetime
+import matplotlib.pyplot as plt
+from functools import partial
 from oscars_toolbox.trabbit import trabbit
 
 # ------ define gates ------ #
 # jones matrices for single qubit rotation; see Simon and Mukunda that show HQQ = SU(2)
 def R(alpha): return np.matrix([[np.cos(alpha), np.sin(alpha)], [-np.sin(alpha), np.cos(alpha)]])
-def Rp(alpha): return np.matrix([[np.cos(alpha), np.sin(alpha)], [np.sin(alpha), np.cos(alpha)]])
+def Rp(alpha): return np.matrix([[np.sin(alpha), np.cos(alpha)], [np.cos(alpha), np.sin(alpha)]])
 def H(theta): return np.matrix([[np.cos(2*theta), np.sin(2*theta)], [np.sin(2*theta), -np.cos(2*theta)]])
 def Q(alpha): return R(alpha) @ np.matrix(np.diag([np.exp(np.pi / 4 * 1j), np.exp(-np.pi / 4 * 1j)])) @ R(-alpha)
 def Rz(theta): return np.matrix(np.diag([np.exp(-1j * theta / 2), np.exp(1j * theta / 2)]))
@@ -24,6 +26,8 @@ def CNOT(N, i, j, theta):
         j: target qubit
         theta1: angle of rotation for H gate
         theta2: angle of rotation for Q gate
+
+    Note: for validation purposes, np.kron(np.kron(P0, I2), I2) + np.kron(np.kron(P1, I2), X) is solution for CNOT(3, 0, 2, 0)
     
     '''
 
@@ -60,54 +64,67 @@ def CNOT(N, i, j, theta):
     return gate
 
 # ------ define circuit ------ #
-def get_circuit(n):
+def get_circuit(n, params):
     '''Returns a parametrized circuit that can approximate any unitary on n qubits.'''
-    def circuit_func(params):
-        # first apply Had to all qubits
-        circuit = Had
-        for _ in range(n-1):
-            circuit = np.kron(circuit, Had)
+    # first apply Had to all qubits
+    circuit = Had
+    for _ in range(n-1):
+        circuit = np.kron(circuit, Had)
 
-        # apply CNOT gates on all pairs of qubits
-        CNOT_params = params[:3*n**2].reshape((n, n))
-        # loop through all qubits as control
-        for i in range(n):
-            # loop through all qubits as target
-            for j in range(n):
-                # skip if control and target are the same
-                if i == j:
-                    continue
-                # apply CNOT, which in general is defined: CNOT = |0><0| x I + |1><1| x X. we extend it 
-                if i < j:
-                    circuit = circuit @ CNOT(n, i, j, CNOT_params[i, j])
-                else:
-                    circuit = circuit @ CNOT(n, j, i, CNOT_params[i, j])
+    # apply CNOT gates on all pairs of qubits
+    CNOT_params = params[:n**2].reshape((n, n))
+    # loop through all qubits as control
+    for i in range(n):
+        # loop through all qubits as target
+        for j in range(n):
+            # apply CNOT, which in general is defined: CNOT = |0><0| x I + |1><1| x X. we extend it 
+            if i < j:
+                circuit = circuit @ CNOT(n, i, j, CNOT_params[i, j])
+            elif i > j:
+                circuit = circuit @ CNOT(n, j, i, CNOT_params[i, j])
 
-        # apply HQQ gates on all qubits
-        HQQ_params = params[3*n**2:].reshape((n, 3))
-        # loop through all qubits
-        for i in range(n):
-            # apply HQQ
-            circuit = np.kron(circuit, H(HQQ_params[i, 0]) @ Q(HQQ_params[i, 1]) @ Q(HQQ_params[i, 2]))
 
-    return circuit_func
+    # apply HQQ gates on all qubits
+    HQQ_params = params[n**2:].reshape((n, 3))
+    # loop through all qubits
+    for i in range(n):
+        # apply HQQ at ith qubit, I2 everywhere else
+        # build up that term and then multiply to the circuit
+        term = 1
+        for j in range(n):
+            if j == i:
+                term = np.kron(term, H(HQQ_params[i, 0]) @ Q(HQQ_params[i, 1]) @ Q(HQQ_params[i, 2]))
+            else:
+                term = np.kron(term, I2)
+        circuit = circuit @ term
+
+    return circuit
 
 # ------ define cost function ------ #
 def loss_func(params, target):
     '''Returns the loss function for a given target unitary.'''
-    circuit_func = get_circuit(int(np.log2(len(target))))
-    return np.linalg.norm(circuit_func(params) - target)
+    n = int(np.log2(target.shape[0]))
+    circuit = get_circuit(n, params)
+    # return np.linalg.norm(circuit - target)
+    return 1-np.abs(np.trace(circuit @ target.conj().T))
 
-def random(): return np.random.uniform(0, 2*np.pi)
+def random_func(size=1): 
+    rand = np.random.uniform(0, 2*np.pi, size=size)
+    if size == 1:
+        return rand[0]
+    else:
+        return rand
 
 def find_params(target):
     '''Returns the parameters that minimize the loss function for a given target unitary.'''
     # initialize parameters
-    n = int(np.log2(len(target)))
-    bounds = [(0, 2*np.pi)] * (3*n**2 + 3*n)
+    n = int(np.log2(target.shape[0]))
+    bounds = [(0, 2*np.pi)] * (n**2 + 3*n)
     # minimize loss function
     loss_func_param = lambda params: loss_func(params, target)
-    return trabbit(loss_func=loss_func_param, random_gen=random, bounds=bounds)
+    random_gen = partial(random_func, size=n**2+3*n)
+    
+    return trabbit(loss_func=loss_func_param, random_gen=random_gen, bounds=bounds, alpha=1, temperature=.01, verbose=True)
 
 # ------ test ------ #
 def random_circuit(n, d, I2_prob = 0.2, H_prob = 0.2, Q_prob = 0.2, HQQ_prob = 0.2, CNOT_prob = 0.2):
@@ -118,33 +135,146 @@ def random_circuit(n, d, I2_prob = 0.2, H_prob = 0.2, Q_prob = 0.2, HQQ_prob = 0
         unitary = np.kron(unitary, Had)
 
     # loop through all layers
-    for k in range(d):
+    for _ in range(d):
         # choose which gates to apply; if CNOT, chose random control and target qubits
         gates = np.random.choice(['I2', 'H', 'Q', 'HQQ', 'CNOT'], size=n, p=[I2_prob, H_prob, Q_prob, HQQ_prob, CNOT_prob])
-        term = 1
-        for gate in gates:
+        term = np.array([1])
+        # initialize list of CNOT gates to apply at the end
+        CNOT_gates = []
+        for j, gate in enumerate(gates):
             if gate == 'I2':
                 term = np.kron(term, I2)
             elif gate == 'H':
-                term = np.kron(term, Had)
+                term = np.kron(term, H(random_func()))
             elif gate == 'Q':
-                term = np.kron(term, Q(random()))
+                term = np.kron(term, Q(random_func()))
             elif gate == 'HQQ':
-                term = np.kron(term, H(random()) @ Q(random()) @ Q(random()))
+                term = np.kron(term, H(random_func()) @ Q(random_func()) @ Q(random_func()))
             elif gate == 'CNOT':
                 i = np.random.choice(n, size=1, replace=False)
-                j = k
-                if j > i:
-                    i, j = j, i
-                term = term @ CNOT(n, i, j, random(), random(), random())
+                if j < i:
+                    i_temp = i
+                    i = j
+                    j = i_temp
+                elif j == i:
+                    # choose another qubit
+                    while j == i:
+                        j = np.random.choice(n, size=1, replace=False)
+                    if j < i:
+                        i_temp = i
+                        i = j
+                        j = i_temp
+                CNOT_gates.append(CNOT(n, i, j, random_func()))
+        # figure out how many I2 to add to make dimensions match
+        if len(CNOT_gates) > 0:
+            for _ in range(len(CNOT_gates)):  
+                term = np.kron(term, I2)
+            for CNOT_gate in CNOT_gates:
+                term = term @ CNOT_gate
         # apply term to unitary
         unitary = unitary @ term
 
     return unitary
 
+# ----- measure circuits ------ #
+def get_entropy(density_matrix):
+    '''Returns the entropy of a given density matrix.'''
+    # get eigenvalues
+    eigvals = np.linalg.eigvals(density_matrix)
+    # get probabilities
+    probs = np.abs(eigvals)**2
+    # return entropy. fully entangled circuit 
+    return -np.sum(probs * np.log(probs))
+
+# ------ plot matrix ------ #
+def print_matrix(matrix, title=None, savefig=False):
+    '''Prints a matrix in a nice way.'''
+    # get magnnitude and phase
+    mag = np.abs(matrix)
+    phase = np.angle(matrix)
+    # where magnitude is 0, phase is 0
+    phase[mag == 0] = 0
+
+    # plot with colorbar
+    fig, ax = plt.subplots(2, 1, figsize=(5, 8))
+    im0 = ax[0].imshow(mag)
+    im1 = ax[1].imshow(phase)
+
+    ax[0].set_title('Magnitude')
+    ax[1].set_title('Phase')
+
+    fig.colorbar(im0, ax=ax[0])
+    fig.colorbar(im1, ax=ax[1])
+
+    if title is not None:
+        fig.suptitle(title)
+
+    plt.tight_layout()
+
+    date = str(datetime.now()).split('.')
+    if savefig and title is not None:
+        plt.savefig(f'elegans_figs/{title}_{date}.pdf')
+    elif savefig:
+        plt.savefig(f'elegans_figs/{date}.pdf')
+
+    plt.show()
+
+def compare_matrices(A, B, title=None, savefig=False):
+    '''Prints two matrices side by side.'''
+    # get magnnitude and phase
+    mag_A = np.abs(A)
+    phase_A = np.angle(A)
+    # where magnitude is 0, phase is 0
+    phase_A[mag_A == 0] = 0
+
+    mag_B = np.abs(B)
+    phase_B = np.angle(B)
+    # where magnitude is 0, phase is 0
+    phase_B[mag_B == 0] = 0
+
+    # plot with colorbar
+    fig, ax = plt.subplots(2, 2, figsize=(10, 8))
+    im0 = ax[0, 0].imshow(mag_A)
+    im1 = ax[1, 0].imshow(phase_A)
+    im2 = ax[0, 1].imshow(mag_B)
+    im3 = ax[1, 1].imshow(phase_B)
+
+    ax[0, 0].set_title('Magnitude')
+    ax[1, 0].set_title('Phase')
+    ax[0, 1].set_title('Magnitude')
+    ax[1, 1].set_title('Phase')
+    
+    fig.colorbar(im0, ax=ax[0, 0])
+    fig.colorbar(im1, ax=ax[1, 0])
+    fig.colorbar(im2, ax=ax[0, 1])
+    fig.colorbar(im3, ax=ax[1, 1])
+
+    if title is not None:
+        fig.suptitle(title)
+
+    plt.tight_layout()
+
+    date = str(datetime.now()).split('.')
+    if savefig and title is not None:
+        plt.savefig(f'elegans_figs/{title}_{date}.pdf')
+    elif savefig:
+        plt.savefig(f'elegans_figs/{date}.pdf')
+    
 if __name__ == '__main__':
-    N = 2
-    print(np.round(CNOT(N, 0, 1, 0)))
+    N = 5
+    d = 5
+    circuit = random_circuit(N, d)
+
+    x_best, loss_best = find_params(circuit)
+    print(x_best)
+    print(loss_best)
+
+    approx = get_circuit(N, x_best)
+
+    compare_matrices(circuit, approx, title=f'N={N}, d={d}, loss={loss_best}', savefig=True)
+
+    
+
 
 
 
