@@ -126,46 +126,91 @@ def circuit_miniP(N, params):
 
     return circ
 
+def circuit_CNOT(N, params):
+    '''Only uses CNOT block for all of the qubits'''
+    assert len(params) == 17*N, f'Need 8N params, got {len(params)}'
+
+    CNOT_params = params[:N]
+    CNOT_extra_b1_params = params[N: 5*N]
+    CNOT_extra_b2_params = params[5*N: 9*N]
+    CNOT_extra_a1_params = params[9*N: 13*N]
+    CNOT_extra_a2_params = params[13*N:]
+
+    # reshape params
+    CNOT_extra_b1_params = np.reshape(CNOT_extra_b1_params, (N, 4))
+    CNOT_extra_b2_params = np.reshape(CNOT_extra_b2_params, (N, 4))
+    CNOT_extra_a1_params = np.reshape(CNOT_extra_a1_params, (N, 4))
+    CNOT_extra_a2_params = np.reshape(CNOT_extra_a2_params, (N, 4))
+
+    circ = np.eye(2**N)
+
+    for i in range(N-1):
+        # apply CNOT between ith and (i+1)th qubits. prepare term to multiply the circuit by which is I for all qubits except the ith and (i+1)th qubits
+        RP_b1 = Rx(CNOT_extra_b1_params[i][0]) @ Ry(CNOT_extra_b1_params[i][1]) @ Rz(CNOT_extra_b1_params[i][2]) @ P(CNOT_extra_b1_params[i][3])
+        RP_b2 = Rx(CNOT_extra_b2_params[i][0]) @ Ry(CNOT_extra_b2_params[i][1]) @ Rz(CNOT_extra_b2_params[i][2]) @ P(CNOT_extra_b2_params[i][3])
+        RP_a1 = Rx(CNOT_extra_a1_params[i][0]) @ Ry(CNOT_extra_a1_params[i][1]) @ Rz(CNOT_extra_a1_params[i][2]) @ P(CNOT_extra_a1_params[i][3])
+        RP_a2 = Rx(CNOT_extra_a2_params[i][0]) @ Ry(CNOT_extra_a2_params[i][1]) @ Rz(CNOT_extra_a2_params[i][2]) @ P(CNOT_extra_a2_params[i][3])
+
+        RP_init = np.kron(RP_b1, RP_b2)
+        RP_final = np.kron(RP_a1, RP_a2)
+        if i == 0:
+            term = RP_final @ CNOTp(CNOT_params[i])@ RP_init
+            # fill in the rest of the term with identity matrices
+            for _ in range(N-2):
+                term = np.kron(term, I2)
+        else:
+            # fill in the first i-1 qubits with identity matrices
+            term = I2
+            for _ in range(i-1):
+                term = np.kron(term, I2)
+            # add CNOT
+            term = np.kron(term, RP_final @ CNOTp(CNOT_params[i])@ RP_init)
+            # fill in the rest of the term with identity matrices
+            for _ in range(N-2-i):
+                term = np.kron(term, I2)
+        # multiply the circuit by the term
+        circ = term @ circ
+    return circ
+
 # -------- randomization -------- #
 def random(N):
     '''Returns a random circuit with 25N params.'''
-    return np.random.uniform(-np.pi, np.pi, size=(25 * N))
+    return np.random.uniform(0, 2*np.pi, size=(25 * N))
 
 def random_mini(N):
     '''Returns a random circuit with 3N params.'''
-    return np.random.uniform(-np.pi, np.pi, size=(3 * N))
+    return np.random.uniform(0, 2*np.pi, size=(3 * N))
 
 def random_miniP(N):
     '''Returns a random circuit with 4N params.'''
-    return np.random.uniform(-np.pi, np.pi, size=(4 * N))
+    return np.random.uniform(0, 2*np.pi, size=(4 * N))
 
-def test_circuit(N):
-    '''Returns a random circuit with 8N params.'''
-    return circuit(N, random(N))
+def random_CNOT(N):
+    '''Returns a random circuit with 16N params.'''
+    return np.random.uniform(0, 2*np.pi, size=(17 * N))
 
-def random_circuit(N, depth, I2_prob = 1/6, Rx_prob = 1/6, Ry_prob = 1/6, Rz_prob = 1/6, P_prob = 1/6, CNOT_prob = 1/6):
+def random_circuit(N, depth, Rx_prob = 1/5, Ry_prob = 1/5, Rz_prob = 1/5, P_prob = 1/5, CNOT_prob = 1/5):
     '''Returns a random circuit for a given number N of qubits and depth and probabilities for each gate being applied to a qubit.'''
 
     # initialize probabilities
-    p = np.array([I2_prob, Rx_prob, Ry_prob, Rz_prob, P_prob, CNOT_prob])
+    p = np.array([Rx_prob, Ry_prob, Rz_prob, P_prob, CNOT_prob])
     p /= np.sum(p)
 
-    print(p)
-
     circ = np.eye(2**N)
+
+    # save a list of lists so we can see what gates were applied to each qubit
+    gates_applied = [[] for _ in range(N)]
 
     # apply random gates to each qubit for the given depth
     for _ in range(depth):
         # apply random gates to each qubit
-        gates = np.random.choice(['I2', 'Rx', 'Ry', 'Rz', 'P', 'CNOT'], size=N, p=p)
+        gates = np.random.choice(['Rx', 'Ry', 'Rz', 'P', 'CNOT'], size=N, p=p)
         for j, gate in enumerate(gates):
-            if gate == 'I2':
-                # print('I2')
-                term = np.eye(2**N)
-            elif gate == 'Rx':
+            param = np.random.uniform(0, 2*np.pi)
+            if gate == 'Rx':
                 # print('Rx')
                 if j == 0:
-                    term = Rx(np.random.uniform(-np.pi, np.pi))
+                    term = Rx(param)
                     # put identity matrices after the Rx
                     for _ in range(N-j-1):
                         term = np.kron(term, I2)
@@ -174,14 +219,14 @@ def random_circuit(N, depth, I2_prob = 1/6, Rx_prob = 1/6, Ry_prob = 1/6, Rz_pro
                     term = I2
                     for _ in range(j-1):
                         term = np.kron(term, I2)
-                    term = np.kron(term, Rx(np.random.uniform(-np.pi, np.pi)))
+                    term = np.kron(term, Rx(param))
                     # put identity matrices after the Rx
                     for _ in range(N-j-1):
                         term = np.kron(term, I2)
             elif gate == 'Ry':
                 # print('Ry')
                 if j == 0:
-                    term = Ry(np.random.uniform(-np.pi, np.pi))
+                    term = Ry(param)
                     # put identity matrices after the Ry
                     for _ in range(N-j-1):
                         term = np.kron(term, I2)
@@ -190,14 +235,14 @@ def random_circuit(N, depth, I2_prob = 1/6, Rx_prob = 1/6, Ry_prob = 1/6, Rz_pro
                     term = I2
                     for _ in range(j-1):
                         term = np.kron(term, I2)
-                    term = np.kron(term, Ry(np.random.uniform(-np.pi, np.pi)))
+                    term = np.kron(term, Ry(param))
                     # put identity matrices after the Ry
                     for _ in range(N-j-1):
                         term = np.kron(term, I2)
             elif gate == 'Rz':
                 # print('Rz')
                 if j == 0:
-                    term = Rz(np.random.uniform(-np.pi, np.pi))
+                    term = Rz(param)
                     # put identity matrices after the Rz
                     for _ in range(N-j-1):
                         term = np.kron(term, I2)
@@ -206,14 +251,14 @@ def random_circuit(N, depth, I2_prob = 1/6, Rx_prob = 1/6, Ry_prob = 1/6, Rz_pro
                     term = I2
                     for _ in range(j-1):
                         term = np.kron(term, I2)
-                    term = np.kron(term, Rz(np.random.uniform(-np.pi, np.pi)))
+                    term = np.kron(term, Rz(param))
                     # put identity matrices after the Rz
                     for _ in range(N-j-1):
                         term = np.kron(term, I2)
             elif gate == 'P':
                 # print('P')
                 if j == 0:
-                    term = P(np.random.uniform(-np.pi, np.pi))
+                    term = P(param)
                     # put identity matrices after the P
                     for _ in range(N-j-1):
                         term = np.kron(term, I2)
@@ -222,12 +267,12 @@ def random_circuit(N, depth, I2_prob = 1/6, Rx_prob = 1/6, Ry_prob = 1/6, Rz_pro
                     term = I2
                     for _ in range(j-1):
                         term = np.kron(term, I2)
-                    term = np.kron(term, P(np.random.uniform(-np.pi, np.pi)))
+                    term = np.kron(term, P(param))
                     # put identity matrices after the P
                     for _ in range(N-j-1):
                         term = np.kron(term, I2)
             elif gate == 'CNOT':
-                # print('CNOT')
+                param = None
                 if j == 0:
                     term = CNOT
                     # fill in the rest of the term with identity matrices
@@ -249,8 +294,14 @@ def random_circuit(N, depth, I2_prob = 1/6, Rx_prob = 1/6, Ry_prob = 1/6, Rz_pro
                     # fill in the rest of the term with identity matrices
                     for _ in range(N-2-j):
                         term = np.kron(term, I2)
+            # add to the circuit
+            gates_applied[j].append([gate, param])
             # multiply the circuit by the term
             circ = term @ circ 
+
+    # print gates applied
+    for i, gates in enumerate(gates_applied):
+        print(f'qubit {i}: {gates}')
 
     return circ
 
@@ -259,40 +310,85 @@ def loss(params, circ_func, target, N):
     '''Returns the loss between the circuit with the given params and the target matrix.'''
     return np.linalg.norm(circ_func(N, params) - target)   
 
-def find_params(target, config=0):
+def find_params(target, model=0, do_tr=True):
     '''Finds the params that minimize the loss between the circuit with the given params and the target matrix.
 
     Params:
         :target: the target matrix
-        :config: whether to use the full circuit (0) or just the Rx Ry Rz block (1) or Rx Ry Rz P block (2)
+        :model: whether to use the full circuit (0) or just the Rx Ry Rz block (1) or Rx Ry Rz P block (2)
+        :do_tr: whether to use trabbit or not
     '''
 
     N = int(np.log2(target.shape[0]))
 
-    if config==0:
+    if model==0:
         random_func = partial(random, N)
         loss_func = partial(loss, circ_func = circuit, target=target, N=N)
 
-    elif config == 1:
+    elif model == 1:
         random_func = partial(random_mini, N)
         loss_func = partial(loss, circ_func = circuit_mini, target=target, N=N)
 
-    elif config == 2:
+    elif model == 2:
         random_func = partial(random_miniP, N)
         loss_func = partial(loss, circ_func = circuit_miniP, target=target, N=N)
+    elif model == 3:
+        random_func = partial(random_CNOT, N)
+        loss_func = partial(loss, circ_func = circuit_CNOT, target=target, N=N)
+
+    if do_tr:
+        # minimize the loss
+        x_best, loss_best = trabbit(loss_func, random_func, temperature=0.1, alpha=0.8, num=50, tol=1e-4)
+        print(f'loss in find_params: {loss_best}')
+        print(f'params: {x_best}')
+
+        # results = minimize(loss_func, x0=random_func(), method='Nelder-Mead', options={'maxiter': 1000})
+        # loss_m = results.fun
+
+        return x_best, loss_best
+    else:
+        # minimize the loss
+        results = minimize(loss_func, x0=random_func(), method='Nelder-Mead', options={'maxiter': 1000})
+
+        x_best = results.x
+        loss_m = results.fun
+
+        print(f'loss in find_params: {loss_m}')
+
+        return x_best, loss_m
     
-    # minimize the loss
-    x_best, loss_best = trabbit(loss_func, random_func, temperature=0.1, alpha=0.8, num=50)
-    print(f'loss in find_params: {loss_best}')
-    print(f'params: {x_best}')
+# -------- testing -------- #
+def match_eigenvalues(eigenvals1, eigenvals2):
+    # create distance matrix
+    distance_matrix = np.abs(eigenvals1[:, np.newaxis] - eigenvals2)
+    
+    # solve assignment problem using Hungarian algorithm
+    row_ind, col_ind = linear_sum_assignment(distance_matrix)
+    
+    # return matched eigenvalues and the total distance
+    matched_eigenvals1 = eigenvals1[row_ind]
+    matched_eigenvals2 = eigenvals2[col_ind]
+    total_distance = np.linalg.norm(matched_eigenvals1 - matched_eigenvals2)
+    return matched_eigenvals1, matched_eigenvals2, total_distance
 
-    results = minimize(loss_func, x0=x_best, method='Nelder-Mead', options={'maxiter': 1000})
+def benchmark(num_qubit, depth, model, reps, Rx_prob = 1/5, Ry_prob = 1/5, Rz_prob = 1/5, P_prob = 1/5, CNOT_prob = 1/5):
+    '''Returns the avg and sem of loss of the model over reps num of trials.'''
+    loss_list = []
+    for _ in trange(reps):
+        # generate random target
+        target = random_circuit(num_qubit, depth, Rx_prob=Rx_prob, Ry_prob = Ry_prob, Rz_prob=Rz_prob, P_prob=P_prob, CNOT_prob=CNOT_prob)
+        # find params
+        params, loss_best = find_params(target, model=model)
+        # calculate loss
+        loss = loss_best
+        # add to list
+        loss_list.append(loss)
 
-    # x_best = results.x
-    loss_m = results.fun
-
-    return x_best, loss_best, loss_m
-
+    # calculate avg and sem
+    avg = np.mean(loss_list)
+    sem = np.std(loss_list) / np.sqrt(reps)
+    print(f'For {reps} random trials, loss is {avg} +- {sem}')
+        
 # -------- visualize -------- #
 def print_matrix(matrix_ls, title=None, savefig=False, display=False):
     '''Prints a matrix in a nice way.'''
@@ -341,66 +437,10 @@ def print_matrix(matrix_ls, title=None, savefig=False, display=False):
     if display:
         plt.show()
 
-def match_eigenvalues(eigenvals1, eigenvals2):
-    # create distance matrix
-    distance_matrix = np.abs(eigenvals1[:, np.newaxis] - eigenvals2)
-    
-    # solve assignment problem using Hungarian algorithm
-    row_ind, col_ind = linear_sum_assignment(distance_matrix)
-    
-    # return matched eigenvalues and the total distance
-    matched_eigenvals1 = eigenvals1[row_ind]
-    matched_eigenvals2 = eigenvals2[col_ind]
-    total_distance = np.linalg.norm(matched_eigenvals1 - matched_eigenvals2)
-    return matched_eigenvals1, matched_eigenvals2, total_distance
-
 if __name__ == '__main__':
-    N = 3 # PROBLEM WITH N = 2
-    depth = 2
-    config = 0 # use full circuit or just Rx Ry Rz block
+    from tqdm import trange
+    N = 6 # PROBLEM WITH N = 2
+    depth = 10
+    model = 2 # use full circuit or just Rx Ry Rz block
 
-    learned_loss_trabbit = []
-    learned_loss_m = []
-    random_loss = []
-    eigenvals_abs_diff = []
-
-    num = 100
-
-    for _ in range(num):
-        target = random_circuit(N, depth)
-        params, loss_val_trabbit, loss_val_m = find_params(target, config=config)
-        if config==0:
-            reconstr = circuit(N, params)
-        elif config==1:
-            reconstr = circuit_mini(N, params)
-        elif config==2:
-            reconstr = circuit_miniP(N, params)
-        print_matrix([target, reconstr], title=f'Learned N={N}, depth={depth}, loss={loss_val_trabbit}', savefig=True, display=False)
-
-        print('---------------')
-        eig_targ = np.linalg.eigvals(target)
-        eig_reconstr = np.linalg.eigvals(reconstr)
-        eig_targ, eig_reconstr, abs_diff = match_eigenvalues(eig_targ, eig_reconstr)
-        eigenvals_abs_diff.append(abs_diff)
-        print('eigenvals of target: ', eig_targ)
-        print('eigenvals of reconstr: ', eig_reconstr)
-        print('abs diff: ', abs_diff)
-        print('---------------')
-
-        learned_loss_trabbit.append(loss_val_trabbit)
-        learned_loss_m.append(loss_val_m)
-
-        # # for comparison, what is loss with totally random circuit?
-        # test = test_circuit(N)
-        # loss_val = np.linalg.norm(target - test)
-        # print_matrix([target, test], title=f'Random N={N}, depth={depth}, loss={loss_val}', savefig=True, display=False)
-        # print(f'loss: {loss_val}')
-        # random_loss.append(loss_val)
-
-    print(f'learned loss trabbit: {min(learned_loss_trabbit)}, {np.mean(learned_loss_trabbit)}, {np.std(learned_loss_trabbit) / np.sqrt(num)}')
-    print(f'learned loss m: {min(learned_loss_m)}, {np.mean(learned_loss_m)}, {np.std(learned_loss_m) / np.sqrt(num)}')
-    # print(f'random loss: {min(random_loss)}, {np.mean(random_loss)}, {np.std(random_loss)}')
-    print(f'eigenvals abs diff: {np.mean(eigenvals_abs_diff)}, {np.std(eigenvals_abs_diff) / np.sqrt(num)}')
-
-    
-
+    benchmark(N, depth, model, 20)
