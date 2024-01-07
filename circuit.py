@@ -8,7 +8,7 @@ gate_map = {
     'Ry': lambda theta: np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]]),
     'Rz': lambda theta: np.array([[np.exp(-1j * theta), 0], [0, np.exp(1j * theta)]]),
     'P': lambda phi: np.array([[1, 0], [0, np.exp(1j * phi)]]),
-    'CNOT': np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1], [0 ,0, 0, 1]]),
+    'CNOT': np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1], [0 ,0, 1, 0]]),
 }
 
 ## ---- manage circuit through gene encoding ----- ##
@@ -66,23 +66,34 @@ class Circuit():
                 qc = term @ qc
         return qc
 
-    def try_genes(self, new_gates, new_params):
+    def try_genes(self, new_params, new_gates):
         '''Takes in new list of lists of gates per qubit and list of params per qubit and returns the resulting unitary'''
-        assert len(new_gates) == self.N, f'Need {self.N} qubit lists, got {len(new_gates)}'        
+
+        if new_gates is None or new_params is None:
+            return self.create_circuit()
+
+        assert len(new_gates) == self.N, f'Need {self.N} qubit lists, got {len(new_gates)}'     
+
+        # print('new gates:', new_gates) 
+        # print('new params:', new_params)
 
         N = self.N
-        print(self.genes)
+
+        # get list of lengths
+        lens = [len(gates) for gates in new_gates]
 
         old_genes = copy.deepcopy(self.genes)
         # add new genes to the list
         for i in range(N): # for each qubit list
             for j in range(len(new_gates[i])): # for each gate in the qubit list
                 if new_gates[i][j] != 'CNOT':
-                    old_genes[i] += [[new_gates[i][j], new_params[i+j]]]
+                    params_index = sum(lens[:i]) + j
+
+                    self.genes[i] += [[new_gates[i][j], new_params[params_index]]]
                 elif new_gates[i][j] == 'CNOT':
                     old_genes[i] += [[new_gates[i][j], None]]
+                # otherwise, do nothing
 
-        print('old genes', old_genes)
         # remove any CNOTs if placed in the last qubit; if so, remove
         genes_last = []
         for i, gates in enumerate(old_genes[-1]): # check list for last qubit
@@ -99,19 +110,31 @@ class Circuit():
         assert len(new_gates) == self.N, f'Need {self.N} qubit lists, got {len(new_gates)}'
         
         N = self.N
+
+        # get list of lengths
+        lens = [len(gates) for gates in new_gates]
+
         # add new genes to the list
         for i in range(N):
             for j in range(len(new_gates[i])):
                 if new_gates[i][j] != 'CNOT':
-                    self.genes[i] += [[new_gates[i][j], new_params[i+j]]]
+                    # get the index of the params, which is the sum of the lengths of the previous genes
+                    params_index = sum(lens[:i]) + j
+
+                    self.genes[i] += [[new_gates[i][j], new_params[params_index]]]
                 elif new_gates[i][j] == 'CNOT':
                     self.genes[i] += [[new_gates[i][j], None]]
         
         # remove any CNOTs if placed in the last qubit; if so, remove
         genes_last = []
-        print('here', self.genes[-1])
         for i, gates in enumerate(self.genes[-1]):
-            print(gates)
             if gates[0] != 'CNOT':
                 genes_last.append(gates)
         self.genes[-1] = genes_last
+
+if __name__ == '__main__':
+    num_qubits = 3
+    genes = [[['Rx', 0.1], ['Ry', 0.2], ['Rz', 0.3], ['P', 0.4], ['CNOT', None]], [['Rx', 0.5], ['Ry', 0.6], ['Rz', 0.7], ['P', 0.8], ['CNOT', None]], [['Rx', 0.9], ['Ry', 1.0], ['Rz', 1.1], ['P', 1.2]]]
+
+    circ = Circuit(N=num_qubits, genes=genes)
+    print(circ.create_circuit())
