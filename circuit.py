@@ -13,7 +13,14 @@ gate_map = {
 
 ## ---- manage circuit through gene encoding ----- ##
 class Circuit():
-    '''Genes come in 2 types: set and new. Set have learned params, whereas new are random params. Each gene contains a gate and param.'''
+    '''Genes come in 2 types: set and new. Set have learned params, whereas new are random params. Each gene contains a gate and param.
+    
+    Methods:
+    create_circuit: takes in list of list of [gate, param] where gate is str and param is float or None if gate == CNOT and calculates the resulting unitary
+    try_genes: used for testing out new parameters without actually changing the genes of the circuit. 
+    update_genes: commits the new gates and params to memory.
+    
+    '''
     def __init__(self, N, genes=None):
         self.N = N
         self.genes = genes
@@ -25,6 +32,7 @@ class Circuit():
 
         if test_genes is None:
             test_genes = self.genes
+            assert test_genes[0] != [], 'Need genes to create circuit'
 
         test_genes = copy.deepcopy(test_genes)
 
