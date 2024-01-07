@@ -185,49 +185,63 @@ def find_params(target, tol=1e-4):
 
         # initialize params
         current_loss = loss(None, circ.create_circuit, target)
+        # current_loss = run(circ, [[] for _ in range(N)])[1]
         print(f'initial CNOT loss: {current_loss}')
         best_loss = current_loss
         best_gates = [[] for _ in range(N)]
+        best_params = []
 
         # iterate over all possible combinations of pairs
         for pairs in pairs_combinations:
             test_gates = [[] for _ in range(N)]
             for pair in pairs:
                 test_gates[pair] = ['CNOT']
-            circ_func = partial(circ.try_genes, new_gates=test_gates)
-            loss_val = loss(None, circ_func, target)
+            print(test_gates)
+
+            # test the loss
+            params, loss_val = run(circ, test_gates)
+
+            # circ_func = partial(circ.try_genes, new_gates=test_gates)
+            # loss_val = loss(None, circ_func, target)
+            print(f'CNOT loss: {loss_val} with {pairs}')
+            print(circ.genes)
             # update the best gates
             if loss_val < best_loss:
                 best_loss = loss_val
                 best_gates = test_gates
+                best_params = params
             
         # update the circuit
-        circ.update_genes(best_gates, None)
+        circ.update_genes(best_gates, best_params)
         print(f'best gates: {best_gates}')
         # check loss
         loss_final = loss(None, circ.create_circuit, target)
         print(f'final CNOT loss: {loss_final}')
-        return circ, loss_final
+        return circ, best_loss
     
     # create circuit object
     circ = Circuit(N=N)
+
+
+    # circ, loss_final = add_CNOT(circ)
+    
     # add RP block
     circ, loss_final = prune_RP(circ)
     if loss_final >= tol:
         # add CNOT layer
         circ, loss_final = add_CNOT(circ)
-    #     c = 0
-    #     while loss_final >= tol and c < 10:
-    #         print('-------')
-    #         print(f'c = {c}')
-    #         print('-------')
-    #         circ, loss_final = prune_RP(circ)
-    #         if loss_final < tol:
-    #             break
-    #         circ, loss_final = add_CNOT(circ)
-    #         if loss_final < tol:
-    #             break
-    #         c += 1
+        c = 0
+        while loss_final >= tol and c < 10:
+            print('-------')
+            print(f'c = {c}')
+            print('-------')
+            circ, loss_final = prune_RP(circ)
+            if loss_final < tol:
+                break
+            circ, loss_final = add_CNOT(circ)
+            if loss_final < tol:
+                break
+            c += 1
     print('Genes', circ.genes)
     return circ.genes, loss_final
 
@@ -249,7 +263,22 @@ def benchmark(N, depth, gen_func, reps=20):
 if __name__ == '__main__':
     num_qubits = 3
     depth = 5
-    target = random_circuit(num_qubits, depth, CNOT_prob=0)
+    target = random_circuit(num_qubits, depth)
     # target = Circuit(N=num_qubits, genes = [[['Rx', np.pi], ['P', np.pi/3]], [['Rx', np.pi], ['Rz', np.pi/6]], [['Rx', np.pi]]]).create_circuit()    
     find_params(target)
+    # genes = [[['Rx', 0.1], ['Ry', 0.2], ['Rz', 0.3], ['P', 0.4], ['CNOT', np.pi/2]], [['Rx', 0.5], ['Ry', 0.6], ['Rz', 0.7], ['P', 0.8], ['CNOT', np.pi/2]], [['Rx', 0.9], ['Ry', 1.0], ['Rz', 1.1], ['P', 1.2]]]
+    
+    
+    
+    # circ = Circuit(N=num_qubits)
+
+    # gates = [['Rx', 'Ry', 'Rz', 'P'], ['Rx', 'Ry', 'Rz', 'P'], ['Rx', 'Ry', 'Rz', 'P']]
+    # params = [[np.pi, np.pi/2, np.pi/3, np.pi/4], [np.pi, np.pi/2, np.pi/3, np.pi/4], [np.pi, np.pi/2, np.pi/3, np.pi/4]]
+
+    # # convert params to single list
+    # params = [param for sublist in params for param in sublist]
+
+    # print(circ.try_genes(new_gates = gates, new_params=params))
+    # circ.update_genes(gates, params)
+    # print(circ.create_circuit())
 
