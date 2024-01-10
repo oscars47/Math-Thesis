@@ -1,6 +1,12 @@
 # Math-Thesis
 Repo for all the code used in my math thesis at Pomona College ('24) with Prof. Ami Radunskaya.
 
+## Major updates
+
+### 1/9/23
+Fixed issue with sample circuits 4-9. Model 2 can now effectively handle [some rotation] CNOT [some rotation] and CNOT [rotation] in any order on the qubits. Will implement simplification on each individual RP section tomorrow.
+ 
+
 ### 1/6/23
 Wrote new Circuit class in circuit.py to handle storage, updating of genes and conversion to unitary. Implemented in elegans_adapt2.py for the iterative learning circuit. Started test_circuits.py which is a framework for simulating the circuits and actually experimentally testing them using Qiskit.
 
