@@ -3,6 +3,28 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+## 1/14/23
+Specific gates to test on model 2.1: I, Hadamard, X, Y, Z, CZ, SWAP, CCNOT (Toffoli), CSWAP (Fredkin), CCCNOT (Toffoli w 2 control)
+
+Running random circuit simulations with AWS. Result summary:
+
+Plan for IBM simulator + actual for random circuits?
+
+SYK model in cirq -- + test w model 2.1!!
+
+### 1/13/23
+Troubleshooting model 0; it doesn't seem possible to simplify as you go, so will create model 2.1 which essentially does model 2 but then finds all the stretches of RxRyRzP and simplifies after the fact. DO THIS
+
+Benchmarking model 2 first: tested on depth of 5 up to 6 qubits, up to depth of 15 on 3 qubits. Handles great on my laptop and will run rigrous test with model 2.1 simplification when I get back from Germany. 
+
+Up to qubit 6 runs relatively fast, but beyond gets a bit slower but not impractical. For ease of testing, will use AWS, testing 16 configurations of qubit # and depth. Will log avg time to complete, avg acc, sem acc. RUN THIS
+
+Realized major impracticality: adds more RP blocks even if no CNOTs: only add if 1) there are no gates yet or 2) there is a CNOT currently as the last item in the qubit list. Fixed this, and this increases speed by quite a bit.
+
+Will move print statements to optional "debug" capacity. DO THIS
+
+Reminder: all in elegans_adapt2.py
+
 ### 1/9/23
 Fixed issue with sample circuits 4-9. Model 2 can now effectively handle [some rotation] CNOT [some rotation] and CNOT [rotation] in any order on the qubits. Will implement simplification on each individual RP section tomorrow.
  
