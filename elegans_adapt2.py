@@ -83,7 +83,7 @@ def random_angles(num_params):
     '''Returns params for the circuit used in optimization'''
     return np.random.uniform(0, 2*np.pi, size=(num_params))
 
-def find_params(target, tol=1e-4, model=2.1, depth=10):
+def find_params(target, tol=1e-4, model=2.1, depth=10, debug = True):
     '''Finds the params that minimize the loss between the circuit with the given params and the target matrix.
 
     Params:
@@ -91,9 +91,11 @@ def find_params(target, tol=1e-4, model=2.1, depth=10):
         :tol: the tolerance for the loss. if loss < tol, then stop
         :model: which model to use. 0 is the full model that includes CNOT, 1 only uses RP, 2 uses RP and CNOT but doesn't prune RP and never formally updates params so they have to be relearned, 2.1 does model 2 but then at the end prunes all the RP sections
         :depth: the max depth of the circuit
+        :debug: whether to include print statements in model 2.
     '''
 
     N = int(np.log2(target.shape[0]))
+    I2 = np.eye(2)
 
     ## helper params for RP ##
     RP_GATES = ['Rx', 'Ry', 'Rz', 'P']
@@ -116,7 +118,7 @@ def find_params(target, tol=1e-4, model=2.1, depth=10):
     for i in range(1, len(pairs)+1):
         pairs_combinations.extend(list(itertools.combinations(pairs, i)))
 
-    def run(circ, gates_test):
+    def run(circ, gates_test, target=target, num_qubits=N):
         '''Runs the circuit with the given gates and finds optimal params. returns the params and loss.
 
         Params:
@@ -129,14 +131,14 @@ def find_params(target, tol=1e-4, model=2.1, depth=10):
             :loss_best: the loss of the circuit
         '''
         # total num of fitting params is sum of len of each gate list
-        num_params = sum([len(gates_test[i]) for i in range(N)])
+        num_params = sum([len(gates_test[i]) for i in range(num_qubits)])
         # call test on circ
         learner = partial(circ.try_genes, new_gates=gates_test)
         loss_func = partial(loss, circ_func = learner, target=target)
         random_func = partial(random_angles, num_params)
 
         # minimize the loss
-        x_best, loss_best = trabbit(loss_func, random_func, alpha=1, temperature = 0, num=1, tol=tol, verbose=True)
+        x_best, loss_best = trabbit(loss_func, random_func, alpha=1, temperature = 0, num=5, tol=tol, verbose=True)
 
         return x_best, loss_best
     
@@ -269,6 +271,58 @@ def find_params(target, tol=1e-4, model=2.1, depth=10):
                 gates_test[i] += copy.deepcopy(RP_GATES_ALL[i])
         x_best, loss_best = run(circ, gates_test)
         return x_best, loss_best, gates_test
+    
+    def do_model2():
+        '''implements model 2. 
+
+        Returns: 
+        :circ: the circ object of the learned circuit
+        
+        '''
+        x_RP, loss_RP, gates_test = add_RP(circ, [[] for _ in range(N)])
+        print(f'initial loss: {loss_RP}')
+
+        # gates_test = [copy.deepcopy(gate) for gate in RP_GATES_ALL]
+
+        if loss_RP < tol:
+            circ.update_genes(gates_test, x_RP)
+            return circ, loss_RP
+        
+        # add CNOT layer
+        gates_test, best_params, best_loss = add_CNOT(circ, update=False, current_gates=gates_test)
+        print(f'best CNOT loss: {best_loss}')
+        print(f'best CNOT gates: {gates_test}')
+
+        if best_loss < tol:
+            circ.update_genes(gates_test, best_params)
+            loss_final = loss(None, circ.create_circuit, target)
+            return circ, loss_final
+        
+        
+        c = 0
+        while best_loss >= tol and c < depth:
+            print('-------')
+            print(f'c = {c}')
+            print('test gates', gates_test)
+            print('-------')
+            best_params, best_loss, gates_test = add_RP(circ, current_gates=gates_test)
+            print(f'best RP loss: {best_loss}')
+
+            if best_loss < tol:
+                circ.update_genes(gates_test, best_params)
+                loss_final = loss(None, circ.create_circuit, target)
+                break
+
+            gates_test, best_params, best_loss = add_CNOT(circ, update=False, current_gates=gates_test)
+            print(f'best CNOT loss: {best_loss}')
+
+            if best_loss < tol:
+                circ.update_genes(gates_test, best_params)
+                loss_final = loss(None, circ.create_circuit, target)
+                break
+            c += 1
+        return circ, loss_final
+    
     # create circuit object
     circ = Circuit(N=N)
 
@@ -311,97 +365,61 @@ def find_params(target, tol=1e-4, model=2.1, depth=10):
     elif model == 1:
         circ, loss_final = prune_RP(circ)
 
-    elif model == 2: # use RP and CNOT but don't prune RP and never formally update params so they have to be relearned 
-        x_RP, loss_RP, gates_test = add_RP(circ, [[] for _ in range(N)])
-        print(f'initial loss: {loss_RP}')
+    elif model == 2 or model == 2.1: # use RP and CNOT but don't prune RP and never formally update params so they have to be relearned 
+        circ, loss_final = do_model2() 
+        print(f'after model 2, {circ.genes}')
 
-        # gates_test = [copy.deepcopy(gate) for gate in RP_GATES_ALL]
+    if model == 2.1:
+        '''Implement final check for sequences of RP'''
+        print('implementing final check for RPs')
+        gates_test, best_params = circ.gates, circ.params
+        new_gates = [[] for _ in range(N)]
+        new_params = []
+        k = 0 # need to keep track of global gate position to get the right param
+        print(gates_test)
+        for j, qubit_gates in enumerate(gates_test):
+            print(f'at {j}th qubit: {qubit_gates}')
+            i = 0
+            while i < len(qubit_gates):
+                print(f'analyzing gate {i}, {qubit_gates[i]}')
+                if (len(qubit_gates) - i >= 3) and (qubit_gates[i] == 'Rx' and qubit_gates[i+1] == 'Ry' and qubit_gates[i+2] == 'Rz' and qubit_gates[i+3] == 'P'):
+                    print('got RP sequence')
+                    # get the desired RP circ as new target
+                    targ_RP = Circuit(N = 1)
+                    targ_RP.update_genes(new_gates=[['Rx', 'Ry', 'Rz', 'P']], new_params=best_params[k+i:k+i+4])
+                    targ_RP_mat = targ_RP.create_circuit()
+                    
+                    if not(np.all(np.isclose(targ_RP_mat, I2, tol))): # only add gate if not close to identity
+                        # learning logic
+                        for gate_seq in SINGLE_GATES: # for every possible sequence of RP gates
+                            print(f'gate seq: {gate_seq}')
+                            
+                            # need to include everything up to qubit i in the best_gates
+                            x_RP_seq, loss_RP_seq = run(targ_RP, [copy.deepcopy(gate_seq)], target=targ_RP_mat, num_qubits = 1)
 
-        if loss_RP < tol:
-            circ.update_genes(gates_test, x_RP)
-            return circ.genes, loss_RP
-        
-        # add CNOT layer
-        best_gates, best_params, best_loss = add_CNOT(circ, update=False, current_gates=gates_test)
-        print(f'best CNOT loss: {best_loss}')
-        print(f'best CNOT gates: {best_gates}')
-
-        if best_loss < tol:
-            circ.update_genes(gates_test, best_params)
-            loss_final = loss(None, circ.create_circuit, target)
-            return circ.genes, loss_final
-        
-        
-        gates_test = best_gates
-        
-        c = 0
-        while best_loss >= tol and c < 10:
-            print('-------')
-            print(f'c = {c}')
-            print('test gates', gates_test)
-            print('-------')
-            best_params, best_loss, gates_test = add_RP(circ, current_gates=gates_test)
-            print(f'best RP loss: {best_loss}')
-
-            if best_loss < tol:
-                circ.update_genes(gates_test, best_params)
-                loss_final = loss(None, circ.create_circuit, target)
-                break
-
-            gates_test, best_params, best_loss = add_CNOT(circ, update=False, current_gates=gates_test)
-            print(f'best CNOT loss: {best_loss}')
-
-            if best_loss < tol:
-                circ.update_genes(gates_test, best_params)
-                loss_final = loss(None, circ.create_circuit, target)
-                break
-            c += 1
-
-    elif model == 2.1: # does model 2 but then at the end checks for RP sequences and prunes them
-        x_RP, loss_RP, gates_test = add_RP(circ, [[] for _ in range(N)])
-        print(f'initial loss: {loss_RP}')
-
-        # gates_test = [copy.deepcopy(gate) for gate in RP_GATES_ALL]
-
-        if loss_RP < tol:
-            circ.update_genes(gates_test, x_RP)
-            return circ.genes, loss_RP
-        
-        # add CNOT layer
-        best_gates, best_params, best_loss = add_CNOT(circ, update=False, current_gates=gates_test)
-        print(f'best CNOT loss: {best_loss}')
-        print(f'best CNOT gates: {best_gates}')
-
-        if best_loss < tol:
-            circ.update_genes(gates_test, best_params)
-            loss_final = loss(None, circ.create_circuit, target)
-            return circ.genes, loss_final
-        
-        
-        gates_test = best_gates
-        
-        c = 0
-        while best_loss >= tol and c < 10:
-            print('-------')
-            print(f'c = {c}')
-            print('test gates', gates_test)
-            print('-------')
-            best_params, best_loss, gates_test = add_RP(circ, current_gates=gates_test)
-            print(f'best RP loss: {best_loss}')
-
-            if best_loss < tol:
-                circ.update_genes(gates_test, best_params)
-                loss_final = loss(None, circ.create_circuit, target)
-                break
-
-            gates_test, best_params, best_loss = add_CNOT(circ, update=False, current_gates=gates_test)
-            print(f'best CNOT loss: {best_loss}')
-
-            if best_loss < tol:
-                circ.update_genes(gates_test, best_params)
-                loss_final = loss(None, circ.create_circuit, target)
-                break
-            c += 1
+                            if loss_RP_seq < tol:
+                                new_gates[j]+=copy.deepcopy(gate_seq)
+                                new_params.append(x_RP_seq)
+                                print(f'successfully learned RP section with loss {loss_RP_seq}')
+                                print(new_gates)
+                                break
+                    i+=4
+                else:
+                    print(f'not RP: {qubit_gates[i]}')
+                    # add what we have here currently
+                    new_gates[j]+=[copy.deepcopy(qubit_gates[i])]
+                    new_params.append(best_params[k+i])
+                    i+=1
+                
+        k += len(qubit_gates)
+    # recalculate loss
+    circ = Circuit(N=N)
+    # update the genes
+    # print(sum([len(qubit_gates) for qubit_gates in new_gates]), len(new_params))
+    print(new_gates)
+    circ.update_genes(new_gates=new_gates, new_params=new_params)
+    # get loss relative to original main target
+    loss_final = loss(None, circ.create_circuit, target)
 
     print('Genes', circ.genes)
     return circ.genes, loss_final
@@ -434,6 +452,30 @@ def sample_circuit(choice):
     circ = Circuit(N=len(genes), genes=genes)
     return circ.create_circuit()
 
+def sample_gates(choice):
+    '''Tests decomposition for several key gates in quantum computation'''
+    if choice == 'H':
+        return np.array([[1, 1], [1, -1]]) * 1 / np.sqrt(2)
+    elif choice == 'X':
+        return np.array([[0, 1], [1, 0]])
+    elif choice == 'Y':
+        return np.array([[0, -1j], [1j, 0]])
+    elif choice == 'Z':
+        return np.array([[1, 0], [0, 1]])
+    elif choice == 'CZ':
+        pass
+    elif choice == 'SWAP':
+        pass
+
+    elif choice == 'CCNOT':
+        pass
+    
+    elif choice == 'CSWAP':
+        pass
+
+    elif choice == 'CCCNOT':
+        pass
+
 # ------ rigorous testing ------ #
 def benchmark(N, depth, gen_func, reps=20, log_text=False):
     '''Returns the avg and sem of loss of the model over reps num of trials.'''
@@ -462,11 +504,11 @@ def benchmark(N, depth, gen_func, reps=20, log_text=False):
         
 if __name__ == '__main__':
     num_qubits = 3
-    depth = 15
+    depth = 5
     target = random_circuit(num_qubits, depth)
     # target = sample_circuit(9)
     # print(np.round(target, 5))
-    find_params(target, model=2)
+    find_params(target, model=2.1, depth=depth)
 
 
 
