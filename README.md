@@ -3,19 +3,28 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
-## 1/14/23
+
+## 1/16/23
+BIG PICTURE GOAL FOR END OF WEEK: 
+research: have rigorous benchmarks on performance of EA2.1 and initial simulation and experiental results.
+writing: rough draft intro chatper
+
 To do:
 * * Specific gates to test on model 2.1: Hadamard, X, Y, Z, CZ, SWAP, CCNOT (Toffoli), CSWAP (Fredkin), CCCNOT (Toffoli w 2 control): ***Add this ***
 
 * Will move print statements to optional "debug" capacity. ***DO THIS***
 
-* Implement computation of measurements for chaos so we can directly compare w theory. Need to figure out pricing.
+* Read more doc of Qiskit transpile
 
-* Up to qubit 6 runs relatively fast, but beyond gets a bit slower but not impractical. For ease of testing, will use AWS, testing 16 configurations of qubit # and depth. Will log avg time to complete, avg acc, sem acc. **RUN THIS**
+* get benchmark for EA2.1 and qiskit on **(3,5), (3,15), (6,5), (6,15)**, (8, 5), (8, 15), (10, 5), (10, 15). log avg time to complete, avg acc, sem acc. 
 
-* Running random circuit simulations with AWS. Result summary:
+* Implement computation of measurements for chaos so we can directly compare w theory. Need to figure out pricing. --> measure correlations between all qubits? what would be an effective measurement that shows we've learned the circuits?
 
 * Once we have figured out the above, go back to SYK model in cirq -- + test w model 2.1!!
+
+## 1/15/23
+Realized Qiskit has a module, transpile, which can convert an arbitrary unitary into decomposed circuit. BUT: much less efficient in terms of number of gates used compared to my algorithm: using a random_circuit(3,5) EA2.1 used ~6 gates whereas Qiskit transpile used ~60-100. Need 
+
 
 ### 1/13/23
 Troubleshooting model 0; it doesn't seem possible to simplify as you go, so will create model 2.1 which essentially does model 2 but then finds all the stretches of RxRyRzP and simplifies after the fact. Implemented this. Increased num times to run trabbit from 1 to 5.
