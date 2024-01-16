@@ -3,27 +3,30 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+BIG PICTURE GOAL FOR END OF WEEK, 1/19/24 
+* research: have rigorous benchmarks on performance of EA2.1 and initial simulation and experiental results.
+* writing: rough draft intro chapter
 
 ## 1/16/23
-BIG PICTURE GOAL FOR END OF WEEK: 
-research: have rigorous benchmarks on performance of EA2.1 and initial simulation and experiental results.
-writing: rough draft intro chatper
+* added 3 levels of ```debug``` to find_params
+* tested on model 2.1: Hadamard, X, Y, Z, CZ, SWAP, CCNOT (Toffoli), CSWAP (Fredkin), CCCNOT (Toffoli w 2 control). 
+** problem with final RP prune not preserving the actual RP sequence: incorrectly pasing the sample circuit using the test_seq to the run. fixed this.
+
+ ** also separate issue with CZ: realized that the current framework of EA2.1 does not allow simultaneous operations.
 
 To do:
-* * Specific gates to test on model 2.1: Hadamard, X, Y, Z, CZ, SWAP, CCNOT (Toffoli), CSWAP (Fredkin), CCCNOT (Toffoli w 2 control): ***Add this ***
-
-* Will move print statements to optional "debug" capacity. ***DO THIS***
-
 * Read more doc of Qiskit transpile
+
+* Implement computation of measurements for chaos so we can directly compare w theory. Need to figure out pricing. --> measure correlations between all qubits? what would be an effective measurement that shows we've learned the circuits?
 
 * get benchmark for EA2.1 and qiskit on **(3,5), (3,15), (6,5), (6,15)**, (8, 5), (8, 15), (10, 5), (10, 15). log avg time to complete, avg acc, sem acc. 
 
-* Implement computation of measurements for chaos so we can directly compare w theory. Need to figure out pricing. --> measure correlations between all qubits? what would be an effective measurement that shows we've learned the circuits?
+* do qiskit simulation, real thing!!
 
 * Once we have figured out the above, go back to SYK model in cirq -- + test w model 2.1!!
 
 ## 1/15/23
-Realized Qiskit has a module, transpile, which can convert an arbitrary unitary into decomposed circuit. BUT: much less efficient in terms of number of gates used compared to my algorithm: using a random_circuit(3,5) EA2.1 used ~6 gates whereas Qiskit transpile used ~60-100. Need 
+Realized Qiskit has a module, transpile, which can convert an arbitrary unitary into decomposed circuit. BUT: much less efficient in terms of number of gates used compared to my algorithm: using a random_circuit(3,5) EA2.1 used ~6 gates whereas Qiskit transpile used ~60-100. Need rigorous comparison
 
 
 ### 1/13/23

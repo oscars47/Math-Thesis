@@ -13,6 +13,64 @@ gate_map = {
 
 }
 
+sample_gates = {
+    'I': np.eye(2),
+    'H': np.array([[1, 1],
+                    [1, -1]]) * 1 / np.sqrt(2),
+    'X': np.array([[0, 1],
+                    [1, 0]]),
+    'Y': np.array([[0, -1j],
+                    [1j, 0]]),
+    'Z': np.array([[1, 0],
+                    [0, 1]]),
+    'CZ': np.array([[1, 0, 0, 0], 
+                    [0, 1, 0, 0], 
+                    [0 ,0, 1, 0], 
+                    [0, 0, 0, -1]]),
+    'SWAP': np.array([[1, 0, 0, 0], 
+                    [0, 0, 1, 0], 
+                    [0 ,1, 0, 0], 
+                    [0, 0, 0, 1]]),
+    'CCNOT': np.array([ # aka Toffoli, like CNOT but with 2 control qubits
+                    [1, 0, 0, 0, 0, 0, 0, 0],
+                    [0 ,1, 0 ,0, 0, 0, 0, 0],
+                    [0 ,0, 1 ,0, 0, 0, 0, 0],
+                    [0 ,0, 0 ,1, 0, 0, 0, 0],
+                    [0 ,0, 0 ,0, 1, 0, 0, 0],
+                    [0 ,0, 0 ,0, 0, 1, 0, 0],
+                    [0 ,0, 0 ,0, 0, 0, 0, 1],
+                    [0 ,0, 0 ,0, 0, 0, 1, 0]
+                    ]) ,
+    'CSWAP': np.array([# aka Fredkin gate
+                        [1, 0, 0, 0, 0, 0, 0, 0],
+                        [0, 0, 1, 0, 0 ,0, 0, 0],
+                        [0, 1, 0, 0, 0 ,0, 0, 0],
+                        [0, 0, 0, 1, 0 ,0, 0, 0],
+                        [0, 0, 0, 0, 1 ,0, 0, 0],
+                        [0, 0, 0, 0, 0 ,0, 1, 0],
+                        [0, 0, 0, 0, 0 ,1, 0, 0],
+                        [0, 0, 0, 0, 0 ,0, 0, 1]
+            ]),
+    'CCCNOT': np.array([ # like CCNOT but with 3 control qubits
+                        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                        [0 ,1, 0, 0, 0, 0, 0, 0, 0, 0, 0 ,0, 0, 0, 0, 0],
+                        [0 ,0, 1, 0, 0, 0, 0, 0, 0, 0, 0 ,0, 0, 0, 0, 0],
+                        [0 ,0, 0, 1, 0, 0, 0, 0, 0, 0, 0 ,0, 0, 0, 0, 0],
+                        [0 ,0, 0, 0, 1, 0, 0, 0, 0, 0, 0 ,0, 0, 0, 0, 0],
+                        [0 ,0, 0, 0, 0, 1, 0, 0, 0, 0, 0 ,0, 0, 0, 0, 0],
+                        [0 ,0, 0, 0, 0, 0, 1, 0, 0, 0, 0 ,0, 0, 0, 0, 0],
+                        [0 ,0, 0, 0, 0, 0, 0, 1, 0, 0, 0 ,0, 0, 0, 0, 0],
+                        [0 ,0, 0, 0, 0, 0, 0, 0, 1, 0, 0 ,0, 0, 0, 0, 0],
+                        [0 ,0, 0, 0, 0, 0, 0, 0, 0, 1, 0 ,0, 0, 0, 0, 0],
+                        [0 ,0, 0, 0, 0, 0, 0, 0, 0, 0, 1 ,0, 0, 0, 0, 0],
+                        [0 ,0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ,1, 0, 0, 0, 0],
+                        [0 ,0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ,0, 1, 0, 0, 0],
+                        [0 ,0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ,0, 0, 1, 0, 0],
+                        [0 ,0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ,0, 0, 0, 0, 1],
+                        [0 ,0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ,0, 0, 0, 1, 0]
+                     ])
+}
+
 ## ---- manage circuit through gene encoding ----- ##
 class Circuit():
     '''Genes come in 2 types: set and new. Set have learned params, whereas new are random params. Each gene contains a gate and param.
@@ -50,7 +108,6 @@ class Circuit():
                         gate[1] = gate[1][0]
                     except:
                         pass
-
                     term = gate_map[gate[0]](gate[1])
                     if i == 0:
                         term = np.kron(term, np.eye(2**(N-1)))
@@ -59,6 +116,7 @@ class Circuit():
                     else:
                         term = np.kron(np.eye(2**i), term)
                         term = np.kron(term, np.eye(2**(N-i-1)))
+                    print('term', term)
                 elif gate[0] == 'CNOT':
                     term = gate_map[gate[0]](gate[1])
                     if i == 0:
@@ -69,9 +127,10 @@ class Circuit():
                         term = np.kron(np.eye(2**i), term)
                         term = np.kron(term, np.eye(2**(N-i-2)))
                 else:
-                    raise ValueError(f"Unsupported gate type: {gate[0]}")
+                    raise ValueError(f'Unsupported gate type: {gate[0]}')
                 # apply the gate to the circuit
                 qc = term @ qc
+                # print(i, j, qc)
         return qc
 
     def try_genes(self, new_params, new_gates):
