@@ -87,8 +87,10 @@ class Circuit():
         if genes is None:
             self.genes = [[] for _ in range(N)] # initialize empty genes
     
-    def create_circuit(self, test_genes=None):
-        '''Converts list of list of [gate, param] where gate is str and param is float or None if gate == CNOT and calculates the resulting unitary'''
+    def create_circuit_bad(self, test_genes=None):
+        '''BAD: applies gates horizontally, not vertically.
+        
+        Converts list of list of [gate, param] where gate is str and param is float or None if gate == CNOT and calculates the resulting unitary'''
 
         if test_genes is None:
             print(f'No genes given, using self.genes: {self.genes}')
@@ -132,8 +134,70 @@ class Circuit():
                 qc = term @ qc
                 # print(i, j, qc)
         return qc
+    
+    def create_circuit(self, test_genes=None):
+        '''Converts list of list of [gate, param] where gate is str and param is float or None if gate == CNOT and calculates the resulting unitary. Applies gates in moments: assumes the same number of 'gates' per qubit. These 'gates' can be composed of multiple fundamental gates.
+        '''
 
-    def try_genes(self, new_params, new_gates):
+        if test_genes is None:
+            print(f'No genes given, using self.genes: {self.genes}')
+            test_genes = self.genes
+            # assert test_genes[0] != [], 'Need genes to create circuit'
+
+        # assert each qubit has the same number of gates
+        assert len(set([len(gates) for gates in test_genes])) == 1, f'Each qubit must have the same number of gates, got {[len(gates) for gates in test_genes]}'
+
+        test_genes = test_genes.copy()
+
+        N = self.N
+
+        qc = np.eye(2**N)
+        for i in range(len(test_genes[0])):
+            # build the moment; get all the gates at this index
+            moment = []
+            for j in range(N): # for each qubit
+                moment.append(test_genes[j][i])
+            
+            # now multiply
+            CNOT_terms = []
+            for j, gate_ls in enumerate(moment): # there can be multiple gates that I want applied at the same time along the same qubit
+                for k, gate in enumerate(gate_ls): # muliply the gates together
+                    # print('gate', gate)
+                    k_qubit_term = gate_map[gate[0]](gate[1])
+                    # first check if CNOT and if so, separate it from 
+                    if gate[0] != 'CNOT':
+                        if k == 0:
+                            qubit_term = k_qubit_term
+                        else:
+                            qubit_term = k_qubit_term @ qubit_term
+                    else:
+                        if k == 0:
+                            CNOT_term = np.kron(k_qubit_term, np.eye(2**(N-2)))
+                            qubit_term = np.eye(2)
+                        elif k == N-2:
+                            CNOT_term = np.kron(np.eye(2**(N-2)), k_qubit_term)
+                            qubit_term = np.eye(2) @ qubit_term
+                        else:
+                            CNOT_term = np.kron(np.eye(2**j), k_qubit_term)
+                            CNOT_term = np.kron(CNOT_term, np.eye(2**(N-j-2)))
+                            qubit_term = np.eye(2) @ qubit_term
+                        CNOT_terms.append(CNOT_term)
+
+                if j == 0: 
+                    moment_term = qubit_term
+                else: # kronecker product the qubit terms together; apply qubit terms from top to bottom
+                    moment_term = np.kron(moment_term, qubit_term)
+            # now apply the CNOTs
+            if len(CNOT_terms) > 0:
+                for CNOT_term in CNOT_terms:
+                    moment_term = CNOT_term @ moment_term
+            
+            # now apply the moment to the circuit
+            qc = moment_term @ qc
+
+        return qc
+
+    def try_genes_bad(self, new_params, new_gates):
         '''Takes in new list of lists of gates per qubit and list of params per qubit and returns the resulting unitary'''
 
         # print('try gebes')
@@ -181,7 +245,21 @@ class Circuit():
 
         return circ
     
-    def update_genes(self, new_gates, new_params):
+    def try_genes(self, new_params, new_gates):
+        '''Takes in new list of lists of gates per qubit and list of params per qubit and returns the resulting unitary. Modified to work with moments'''
+
+        og_genes = copy.deepcopy(self.genes)
+
+        # update the genes, get the circuit, and then reset the genes
+        self.update_genes(new_gates, new_params)
+
+        circ = self.create_circuit()
+
+        self.genes = og_genes.copy() # reset the genes
+
+        return circ
+
+    def update_genes_bad(self, new_gates, new_params):
         '''Takes in new list of lists of gates per qubit and list of params per qubit and updates the genes'''
         
         assert len(new_gates) == self.N, f'Need {self.N} qubit lists, got {len(new_gates)} for {new_gates}'
@@ -210,6 +288,36 @@ class Circuit():
             if gates[0] != 'CNOT':
                 genes_last.append(gates)
         self.genes[-1] = genes_last
+
+    def update_genes(self, new_gates, new_params):
+        '''Takes in new list of lists of gates per qubit and list of params per qubit and updates the genes. Modified to work with moments'''
+        
+        assert len(new_gates) == self.N, f'Need {self.N} qubit lists, got {len(new_gates)} for {new_gates}'
+
+        assert len(set([len(gates) for gates in new_gates])) == 1, f'Each qubit must have the same number of gates, got {[len(gates) for gates in new_gates]}'
+
+        self.gates = copy.deepcopy(new_gates)
+        self.params = copy.deepcopy(new_params)
+
+        N = self.N
+
+        # print('new gates:', new_gates)
+        # print('new params:', new_params)
+
+        # add new genes to the list
+        params_index = 0
+        for i in range(N):
+            qubit_genes = []
+            for j in range(len(new_gates[i])):
+                qubit_sub_genes = []
+                for k in range(len(new_gates[i][j])):
+                    if new_gates[i][j][k] == 'CNOT' and i == N-1: # if try to put CNOT in last qubit, substitue w identity
+                        qubit_sub_genes += [['Rx', 0]]
+                    else:
+                        qubit_sub_genes += [[new_gates[i][j][k], new_params[params_index]]]
+                    params_index += 1
+                qubit_genes.append(qubit_sub_genes)
+            self.genes[i] += qubit_genes
 
 if __name__ == '__main__':
     num_qubits = 3
