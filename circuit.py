@@ -140,7 +140,7 @@ class Circuit():
         '''
 
         if test_genes is None:
-            print(f'No genes given, using self.genes: {self.genes}')
+            # print(f'No genes given, using self.genes: {self.genes}')
             test_genes = self.genes
             # assert test_genes[0] != [], 'Need genes to create circuit'
 
@@ -312,16 +312,59 @@ class Circuit():
                 qubit_sub_genes = []
                 for k in range(len(new_gates[i][j])):
                     if new_gates[i][j][k] == 'CNOT' and i == N-1: # if try to put CNOT in last qubit, substitue w identity
-                        qubit_sub_genes += [['Rx', 0]]
+                        qubit_sub_genes += [['I', 0]]
                     else:
                         qubit_sub_genes += [[new_gates[i][j][k], new_params[params_index]]]
                     params_index += 1
                 qubit_genes.append(qubit_sub_genes)
             self.genes[i] += qubit_genes
 
-if __name__ == '__main__':
-    num_qubits = 3
-    genes = [[['Rx', 0.1], ['Ry', 0.2], ['Rz', 0.3], ['P', 0.4], ['CNOT', None]], [['Rx', 0.5], ['Ry', 0.6], ['Rz', 0.7], ['P', 0.8], ['CNOT', None]], [['Rx', 0.9], ['Ry', 1.0], ['Rz', 1.1], ['P', 1.2]]]
+    def separate_genes(self):
+        '''Returns the gates and params separately'''
+        N = self.N
+        gates = [[] for _ in range(N)]
+        params =[]
 
-    circ = Circuit(N=num_qubits, genes=genes)
-    print(circ.create_circuit())
+        for i, qubit_gates in enumerate(self.genes):
+            for sub_qubit_gate in qubit_gates:
+                sub_gates = []
+                for gate in sub_qubit_gate:
+                    sub_gates.append(gate[0])
+                    params.append(gate[1])
+                gates[i].append(sub_gates)
+        
+        return gates, params
+    
+    def count_num_gates(self, gates=None, include_I2=False):
+        '''Returns the number of gates in the circuit. Default is to use the gates already set by the circuit, but can also take in a new set of gates.'''
+        if gates is None:
+            gates = copy.deepcopy(self.genes)
+            
+        if include_I2:
+            return sum([len(gates[i][j]) for i in range(len(gates)) for j in range(len(gates[i]))])
+        else:
+            c = 0
+            # don't include identity gates
+            for qubit_gates in gates:
+                for sub_qubit_gates in qubit_gates:
+                    for gate in sub_qubit_gates:
+                        if gate != 'I':
+                            c+=1
+            return c
+if __name__ == '__main__':
+    import itertools
+    N=3
+    RP_GATES = ['Rx', 'Ry', 'Rz', 'P']
+    RP_GATES_ALL = [RP_GATES for _ in range(N)]
+    SINGLE_GATES = []
+    for i in range(1, len(RP_GATES)+1):
+        SINGLE_GATES.extend(list(itertools.combinations(RP_GATES, i)))
+
+    # make sure SINGLE_GATES properly formatted
+    for i, sequence in enumerate(SINGLE_GATES):
+        if len(sequence) == 1:
+            SINGLE_GATES[i] = [sequence[0]]
+        else:
+            SINGLE_GATES[i] = [gate for gate in sequence]
+
+    print(SINGLE_GATES)
