@@ -14,7 +14,7 @@ GATE_SET = ['rx', 'ry', 'rz', 'p', 'cx']
 GATE_SET_RP = ['rx', 'ry', 'rz', 'p']
 
 ## prepare decomposition ##
-def decompose_qc(optimized_circuit, N, max_depth=None, N2=None, target=None):
+def decompose_qc(optimized_circuit, N, max_depth, N2=None, target=None):
     '''Decomposes the optimized circuit into normalized vector of angles and summary vector representing the circuit
 
     Params:
@@ -23,7 +23,13 @@ def decompose_qc(optimized_circuit, N, max_depth=None, N2=None, target=None):
         max_depth: int, maximum depth of circuit
         N2: int, dimension of hilbert space
         target: np.array, (optional) target matrix to compute norm of difference
+
+    Returns:
+        angles, optimized_summary_tensor
     '''
+
+    if N2 is None:
+        N2 = N
 
      # create summary from the optimized circuit
     optimized_summary = [[] for _ in range(N)]
@@ -48,40 +54,28 @@ def decompose_qc(optimized_circuit, N, max_depth=None, N2=None, target=None):
             if gate_name == 'cx':
                 # need to make sure control and target qubit appear at the same index for their respective qubits
                 # figure out which is smaller and append 0s until the indices are the same
-                if control_qubit_index < target_qubit_index:
-                    optimized_summary[control_qubit_index] += [0] * (target_qubit_index - control_qubit_index)
-                    control_qubit_index = target_qubit_index
-                elif target_qubit_index < control_qubit_index:
-                    optimized_summary[target_qubit_index] += [0] * (control_qubit_index - target_qubit_index)
-                    target_qubit_index = control_qubit_index
-                optimized_summary[control_qubit_index].append(int(f'5'))
-                optimized_summary[target_qubit_index].append(int(f'6'))
+                optimized_summary[control_qubit_index].append(target_qubit_index+len(GATE_SET))
             else:
                 # the index in the GATE_SET is what we add to the summary
                 # find index
                 name_index = GATE_SET.index(gate_name)+1
                 optimized_summary[qubit_index].append(name_index)
-
-    # make sure sizes are correct
-    print(f'optimized_summary before 7s: {optimized_summary}')
     
-    # convert the optimized summary to a single list using the '7' as the separator
+    # convert the optimized summary to a single list of sequences of length max_depth
     optimized_summary_new = []
     for row in optimized_summary:
-        for r in row:
-            optimized_summary_new.append(r)
-        optimized_summary_new.append(7)
+        # if length is not max_depth, append 0s
+        if len(row) < max_depth:
+            row += [0] * (max_depth - len(row))
+        optimized_summary_new += row
 
-    # pad to max depth
-    # full length is N2 * max_depth
-    if max_depth is not None:
-        optimized_summary_new += [0] * (N2 * max_depth - len(optimized_summary_new))
+    num_total_classes = len(GATE_SET) + N2 + 1
         
     # need to convert to vector of vector form
     optimized_summary_tensor = []
     for elem in optimized_summary_new:
         # create one hot vector
-        one_hot = [0] * 8
+        one_hot = [0] * num_total_classes
         one_hot[elem] = 1
         one_hot = np.array(one_hot)
         optimized_summary_tensor.append(one_hot)
@@ -113,10 +107,12 @@ def decompose_qc(optimized_circuit, N, max_depth=None, N2=None, target=None):
     # sort angles from smallest to largest
     angles = np.sort(angles)
 
+    print('optimized summary\n', optimized_summary)
+
     return angles, optimized_summary_tensor
 
 ## generate random circuit ##
-def gen_random_circuit(N, depth, N2=None, plot=False):
+def gen_random_circuit(N, max_depth, N2=None, plot=False, check_fidelity=False):
     '''Returns random circuit with N qubits and depth.
     
     If N2 is None, then the circuit is on N qubits. Else, if we want to encode the circuit within a larger space, then N2 is the dimension of the larger space. 
@@ -135,8 +131,10 @@ def gen_random_circuit(N, depth, N2=None, plot=False):
 
     Params:
         N: int, number of qubits
-        depth: int, depth of circuit
+        max_depth: int, depth of circuit
         N2: int, dimension of hilbert space
+        plot: bool, whether to plot the circuit
+        check_fidelity: bool, whether to check the fidelity of transpiled circuit against actual
     '''
 
     # Create a quantum circuit with the appropriate number of qubits
@@ -153,12 +151,9 @@ def gen_random_circuit(N, depth, N2=None, plot=False):
 
     # go through and apply random gates
     for i in range(N):
-        for j in range(depth):
+        for j in range(max_depth):
             # choose random set of gate
-            if j < depth - 1:
-                gate = np.random.choice(GATE_SET, p=p)
-            else:
-                gate = np.random.choice(GATE_SET_RP, p=p_new)
+            gate = np.random.choice(GATE_SET, p=p)
             if gate in GATE_SET_RP:
                 if gate == 'rx':
                     # choose random angle
@@ -224,26 +219,38 @@ def gen_random_circuit(N, depth, N2=None, plot=False):
     optimized_circuit = transpile(qc, optimization_level=3, basis_gates=['rx', 'ry', 'rz', 'p', 'cx'])
     #                                                                      1,   2,    3,   4,    5,6
     
+    if check_fidelity:
+        # get the matrix representation of the circuit
+        matrix = Operator(optimized_circuit).data
+        # get the matrix representation of the target
+        target = Operator(qc).data
+        # compute the norm of the difference
+        norm = np.linalg.norm(matrix - target)
+        # normalize by the dimension of the matrix
+        norm /= matrix.shape[0]
+        # print the norm
+        print('norm of difference:', norm)
+
     if plot:
-        qc.draw('mpl')
+        optimized_circuit.draw('mpl')
         # get timestamp to save figure
         if not os.path.exists('figures'):
             os.makedirs('figures')
-        plt.savefig(os.path.join('figures', f'random_circuit_{N}_{depth}_{N2}_{time()}.png'))
+        plt.savefig(os.path.join('figures', f'random_circuit_{N}_{max_depth}_{N2}_{time()}.png'))
         plt.show()
     
     return optimized_circuit
 
 ## decompose random circuit ##
-def random_decompose(N, depth, N2=None, max_depth=None, target=None, plot=False):
+def random_decompose(N, max_depth, N2=None, target=None, plot=False):
     '''Runs gen_random_circuit and decompose_qc and returns the result.'''
     # generate random circuit
-    optimized_circuit = gen_random_circuit(N, depth, N2=N2, plot=plot)
+    optimized_circuit = gen_random_circuit(N, max_depth=max_depth, N2=N2, plot=plot)
     # decompose
     return decompose_qc(optimized_circuit, N, max_depth=max_depth, N2=N2, target=target)
 
 ## for testing ##
-def recompose_qc(summary_vec, N, N2=None, plot=False):
+def recompose_qc(summary_vec, N, N2=None, max_depth = 100, plot=False):
     '''Recomposes a quantum circuit from a summary vector.'''
     if N2 is None:
         N2 = N
@@ -251,23 +258,39 @@ def recompose_qc(summary_vec, N, N2=None, plot=False):
     # first convert from vector of vectors to vector
     summary_vec = np.argmax(summary_vec, axis=1)
 
-    # split into rows based on 7. find indices of 7
-    indices = np.where(summary_vec == 7)[0]
-    # split into rows
-    rows = np.split(summary_vec, indices)
-    # remove the 7s
-    rows = [row[row != 7] for row in rows]
-    # remove empty rows
-    rows = [row for row in rows if len(row) > 0]
-    # remove any rows of all 0
-    rows = [row for row in rows if not np.all(row == 0)]
-    # convert to list
-    rows = list(rows)
-    # convert to list of lists
-    rows = [list(row) for row in rows]
-    print(rows)
-    
+    # convert to list of lists, splitting based on max_depth
+    summary = []
+    for i in range(0, len(summary_vec), max_depth):
+        summary.append(summary_vec[i:i+max_depth])
 
+    print('reconstructed summary\n', summary)
+
+    # now iterate through the summary and apply gates to the circuit
+    qc = QuantumCircuit(N2)
+
+    for i in range(N2):
+        for j in range(max_depth):
+            gate = summary[i][j]
+            if gate == 0:
+                pass
+            elif gate == 1:
+                qc.rx(0, i)
+            elif gate == 2:
+                qc.ry(0, i)
+            elif gate == 3:
+                qc.rz(0, i)
+            elif gate == 4:
+                qc.p(0, i)
+            elif gate > 4: # this is the target qubit for a CX gate
+                qc.cx(i, gate-len(GATE_SET))
+            
+    if plot:
+        qc.draw('mpl')
+        if not os.path.exists('figures'):
+            os.makedirs('figures')
+        plt.savefig(os.path.join('figures', f'reconstruction_{N}_{max_depth}_{N2}_{time()}.png'))
+        plt.show()
+    
 def get_single_rc(N=5, depth=10, N2=None, plot=True, save=False, show_summary=True):
     '''Returns a single random circuit with N qubits and depth encoded in N2 qubit space.'''
     if N2 is None:
@@ -281,6 +304,22 @@ def get_single_rc(N=5, depth=10, N2=None, plot=True, save=False, show_summary=Tr
     
     # now recompose
     recompose_qc(summary, N, N2=N2, plot=plot)
+
+def plot_eigenvalues(num = 100, N=5, max_depth=10, N2=None):
+    '''Plots histogram of eigenvalues of random circuits.'''
+    if N2 is None:
+        N2 = N
+
+    eigenvalues = []
+    for i in trange(num):
+        # generate random circuit
+        optimized_circuit = gen_random_circuit(N, max_depth=max_depth, N2=N2)
+        # compute eigenvalues
+        eigenvalues += list(np.linalg.eig(Operator(optimized_circuit).data)[0])
+
+    plt.hist(eigenvalues, bins=100)
+    plt.savefig(f'eigenvalues_{N}_{max_depth}_{N2}.png')
+    plt.show()
 
 ##### build dataset #####
 def build_dataset(total_num, N2=10, N0=3, max_depth=100):
@@ -313,12 +352,12 @@ def build_dataset(total_num, N2=10, N0=3, max_depth=100):
         # random depth, uniform distribution
         # choose the depth from 1 to max_depth
         depth = np.random.randint(1, max_depth)
-        circuit_tensor, summary = gen_random_circuit(N, depth, N2=N2, max_depth=max_depth)
-        if len(summary) != individual_y_len:
+        angles, summary_tensor = random_decompose(N, depth, N2=N2, max_depth=max_depth)
+        if len(summary_tensor) != individual_y_len:
             print(f'not valid size summary vector. N: {N}, depth: {depth}, len(summary): {len(summary)}')
         else:
-            x.append(circuit_tensor)
-            y.append(summary)
+            x.append(angles)
+            y.append(summary_tensor)
 
     # make sure save directory exists
     if not os.path.exists('data'):
@@ -327,6 +366,7 @@ def build_dataset(total_num, N2=10, N0=3, max_depth=100):
     # save dataset
     x = np.array(x)
     y = np.array(y)
+
     try:
         np.save(os.path.join('data', f'x_{N2}_{max_depth}_{total_num}.npy'), x)
     except ValueError:
@@ -348,7 +388,7 @@ def build_dataset(total_num, N2=10, N0=3, max_depth=100):
     #                               loaded_list = pickle.load(file)
 
 if __name__ == '__main__':
-
-    get_single_rc()
-
- 
+    N = 3
+    max_depth = 20
+    build_dataset(100000, N2=10, N0=3, max_depth=max_depth)
+    
