@@ -107,7 +107,7 @@ def decompose_qc(optimized_circuit, N, max_depth, N2=None, target=None):
     # sort angles from smallest to largest
     angles = np.sort(angles)
 
-    print('optimized summary\n', optimized_summary)
+    # print('optimized summary\n', optimized_summary)
 
     return angles, optimized_summary_tensor
 
@@ -125,14 +125,13 @@ def gen_random_circuit(N, max_depth, N2=None, plot=False, check_fidelity=False):
         2: ry
         3: rz
         4: p
-        5: cx control
-        6: cx target
-        7: end of qubit sequence
+        5+: cx, where the target qubit is the index of the gate minus 5
+
 
     Params:
         N: int, number of qubits
         max_depth: int, depth of circuit
-        N2: int, dimension of hilbert space
+        N2: int, dimension of total hilbert space
         plot: bool, whether to plot the circuit
         check_fidelity: bool, whether to check the fidelity of transpiled circuit against actual
     '''
@@ -145,7 +144,7 @@ def gen_random_circuit(N, max_depth, N2=None, plot=False, check_fidelity=False):
         qc = QuantumCircuit(N2)
 
     # random simplex probability to choose gates
-    p = np.random.dirichlet(np.ones(5))
+    p = np.random.dirichlet(np.ones(len(GATE_SET)))
     p_new = p.copy()[:-1]
     p_new /= np.sum(p_new)
 
@@ -181,14 +180,14 @@ def gen_random_circuit(N, max_depth, N2=None, plot=False, check_fidelity=False):
                 eligible_elements = [x for x in range(N) if x != i]
 
                 # check if the list is empty
-                if eligible_elements:
+                if len(eligible_elements)>0:
                     target = np.random.choice(eligible_elements)
                     
                     # apply gate
                     qc.cx(i, target)
                 else:
                     # choose random gate from RP
-                    gate = np.random.choice(['rx', 'ry', 'rz', 'p'], p=p_new)
+                    gate = np.random.choice(GATE_SET_RP, p=p_new)
                     # apply gate
                     if gate == 'rx':
                         # choose random angle
@@ -216,7 +215,7 @@ def gen_random_circuit(N, max_depth, N2=None, plot=False, check_fidelity=False):
         for i in range(N, N2):
             qc.id(i)
 
-    optimized_circuit = transpile(qc, optimization_level=3, basis_gates=['rx', 'ry', 'rz', 'p', 'cx'])
+    optimized_circuit = transpile(qc, optimization_level=3, basis_gates=GATE_SET)
     #                                                                      1,   2,    3,   4,    5,6
     
     if check_fidelity:
@@ -229,7 +228,8 @@ def gen_random_circuit(N, max_depth, N2=None, plot=False, check_fidelity=False):
         # normalize by the dimension of the matrix
         norm /= matrix.shape[0]
         # print the norm
-        print('norm of difference:', norm)
+        if plot:
+            print('norm of difference:', norm)
 
     if plot:
         optimized_circuit.draw('mpl')
@@ -238,8 +238,10 @@ def gen_random_circuit(N, max_depth, N2=None, plot=False, check_fidelity=False):
             os.makedirs('figures')
         plt.savefig(os.path.join('figures', f'random_circuit_{N}_{max_depth}_{N2}_{time()}.png'))
         plt.show()
-    
-    return optimized_circuit
+    if not check_fidelity:
+        return optimized_circuit
+    else:
+        return optimized_circuit, norm
 
 ## decompose random circuit ##
 def random_decompose(N, max_depth, N2=None, target=None, plot=False):
@@ -247,7 +249,14 @@ def random_decompose(N, max_depth, N2=None, target=None, plot=False):
     # generate random circuit
     optimized_circuit = gen_random_circuit(N, max_depth=max_depth, N2=N2, plot=plot)
     # decompose
-    return decompose_qc(optimized_circuit, N, max_depth=max_depth, N2=N2, target=target)
+    angles, summary = decompose_qc(optimized_circuit, N, max_depth=max_depth, N2=N2, target=target)
+    if N2 is None:
+        N2 = N
+    while len(summary) != N2*max_depth:
+        # print('not valid size summary vector. N: {N}, depth: {max_depth}, len(summary): {len(summary)}')
+        optimized_circuit = gen_random_circuit(N, max_depth=max_depth, N2=N2, plot=plot)
+        angles, summary = decompose_qc(optimized_circuit, N, max_depth=max_depth, N2=N2, target=target)
+    return angles, summary
 
 ## for testing ##
 def recompose_qc(summary_vec, N, N2=None, max_depth = 100, plot=False):
@@ -321,6 +330,70 @@ def plot_eigenvalues(num = 100, N=5, max_depth=10, N2=None):
     plt.savefig(f'eigenvalues_{N}_{max_depth}_{N2}.png')
     plt.show()
 
+def benchmark_transpile(num = 100, N0=3, Nf = 10, min_max_depth=10, max_max_depth = 100, depth_steps = 10, N2=None):
+    '''Rigorously compute the mean and sem of transpilation accuracy as defined as the norm of the difference between the transpiled and original circuit.'''
+    # for all N in N0 to Nf, for all depths in min_max_depth to max_max_depth, compute the mean and sem of the norm of the difference between the transpiled and original circuit
+    # store in a dictionary
+    # key: (N, depth)
+    # value: (mean, sem)
+    results = {}
+
+    for N in range(N0, Nf+1):
+        for depth in range(min_max_depth, max_max_depth+1, depth_steps):
+            # create list of norms
+            norms = []
+            for i in trange(num):
+                # generate random circuit
+                if N2 is None:
+                    _, norm = gen_random_circuit(N, depth, check_fidelity=True)
+                else:
+                    _, norm = gen_random_circuit(N, depth, N2=N2, check_fidelity=True)
+                # compute eigenvalues
+                norms.append(norm)
+
+            # compute mean and sem
+            mean = np.mean(norms)
+            sem = np.std(norms) / np.sqrt(len(norms))
+
+            print(f'N: {N}, depth: {depth}, mean: {mean}, sem: {sem}')
+
+            # store in dictionary
+            results[(N, depth)] = (mean, sem)
+
+    # save results
+    if not os.path.exists('results'):
+        os.makedirs('results')
+    np.save(os.path.join('results', f'benchmark_transpile_{N0}_{Nf}_{min_max_depth}_{max_max_depth}_{depth_steps}_{N2}.npy'), results)
+
+def plot_benchmark_transpile(results_dict):
+    '''Reads in dictionary from benchmark_transpile and plots the results.'''
+    # plot the results
+    # x axis: number of qubits
+    # y axis: depth
+    # z axis: mean of norm of difference
+    # color: sem of norm of difference
+
+    # get the keys
+    keys = list(results_dict.keys())
+    # get the values
+    values = list(results_dict.values())
+    # get the mean and sem
+    means = [x[0] for x in values]
+    sems = [x[1] for x in values]
+
+    # get the Ns and depths
+    Ns = [x[0] for x in keys]
+    depths = [x[1] for x in keys]
+
+    # plot
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(Ns, depths, means, c=sems, cmap='viridis')
+    ax.set_xlabel('Number of Qubits')
+    ax.set_ylabel('Depth')
+    ax.set_zlabel('Mean of Norm of Difference')
+    plt.show()
+
 ##### build dataset #####
 def build_dataset(total_num, N2=10, N0=3, max_depth=100):
     '''Builds dataset of total_num random circuits with randomized N qubits in N2 qubit hilbert space and random depth.
@@ -332,32 +405,50 @@ def build_dataset(total_num, N2=10, N0=3, max_depth=100):
     
     
     '''
+    if N2 - N0 > 0:
+        # repeat each N total_num / (N2 - N0) times
+        num_repeats = total_num // (N2 - N0)
+        # get the vector of Ns
+        Ns = np.arange(N0, N2)
+        Ns = np.repeat(Ns, num_repeats)
+        # shuffle
+        np.random.shuffle(Ns)
 
-    # repeat each N total_num / (N2 - N0) times
-    num_repeats = total_num // (N2 - N0)
-    # get the vector of Ns
-    Ns = np.arange(N0, N2)
-    Ns = np.repeat(Ns, num_repeats)
-    # shuffle
-    np.random.shuffle(Ns)
+        print(f'Number of circuits to create: {len(Ns)}')
 
-    print(f'Number of circuits to create: {len(Ns)}')
+        # create dataset
+        x = []
+        y = []
+        individual_y_len = N2*max_depth
+        for i in trange(len(Ns)):
+            N = Ns[i]
+            # random depth, uniform distribution
+            # choose the depth from 1 to max_depth
+            depth = np.random.randint(1, max_depth)
+            angles, summary_tensor = random_decompose(N, N2=N2, max_depth=max_depth)
+            if len(summary_tensor) != individual_y_len:
+                print(f'not valid size summary vector. N: {N}, depth: {depth}, len(summary): {len(summary_tensor)}')
+            else:
+                x.append(angles)
+                y.append(summary_tensor)
 
-    # create dataset
-    x = []
-    y = []
-    individual_y_len = N2*max_depth
-    for i in trange(len(Ns)):
-        N = Ns[i]
-        # random depth, uniform distribution
-        # choose the depth from 1 to max_depth
-        depth = np.random.randint(1, max_depth)
-        angles, summary_tensor = random_decompose(N, depth, N2=N2, max_depth=max_depth)
-        if len(summary_tensor) != individual_y_len:
-            print(f'not valid size summary vector. N: {N}, depth: {depth}, len(summary): {len(summary)}')
-        else:
-            x.append(angles)
-            y.append(summary_tensor)
+    else:
+        print('doing single!')
+        x = []
+        y = []
+        N = N2
+        individual_y_len = N*max_depth
+        for i in trange(total_num):
+            # random depth, uniform distribution
+            # choose the depth from 1 to max_depth
+            # depth = np.random.randint(1, max_depth)
+            angles, summary_tensor = random_decompose(N, max_depth=max_depth)
+            if len(summary_tensor) != individual_y_len:
+                print(f'not valid size summary vector. N: {N}, depth: {max_depth}, len(summary): {len(summary_tensor)}')
+            else:
+                x.append(angles)
+                y.append(summary_tensor)
+
 
     # make sure save directory exists
     if not os.path.exists('data'):
@@ -388,7 +479,8 @@ def build_dataset(total_num, N2=10, N0=3, max_depth=100):
     #                               loaded_list = pickle.load(file)
 
 if __name__ == '__main__':
-    N = 3
-    max_depth = 20
-    build_dataset(100000, N2=10, N0=3, max_depth=max_depth)
+    # N = 3
+    # max_depth = 20
+    # build_dataset(100000, N0=N, N2=N, max_depth=max_depth)
+    benchmark_transpile(num=1000)
     
