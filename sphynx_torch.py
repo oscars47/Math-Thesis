@@ -12,14 +12,19 @@ class BranchNetwork(nn.Module):
     def __init__(self, input_size, output_size):
         super(BranchNetwork, self).__init__()
         self.fc1 = nn.Linear(input_size, 128)
-        self.fc2 = nn.Linear(128, 64)
-        self.fc3 = nn.Linear(64, 32)
-        self.fc4 = nn.Linear(32, output_size)
+        self.fc2 = nn.Linear(128, 128)
+        self.fc3 = nn.Linear(128, 128)
+        self.fc4 = nn.Linear(128, 64)
+        self.fc5 = nn.Linear(64, 32)
+        self.fc6 = nn.Linear(32, output_size)
 
     def forward(self, x):
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
-        x = self.fc3(x)  # Outputs raw scores for each class
+        x = torch.relu(self.fc3(x))
+        x = torch.relu(self.fc4(x))
+        x = torch.relu(self.fc5(x))
+        x = self.fc6(x)
         return x
 
 class SphinxModel(nn.Module):
@@ -28,7 +33,9 @@ class SphinxModel(nn.Module):
         super(SphinxModel, self).__init__()
         self.fc1 = nn.Linear(input_size, 512)
         self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, 128)
+        self.fc3 = nn.Linear(256, 256)
+        self.fc4 = nn.Linear(256, 256)
+        self.fc5 = nn.Linear(256, 128)
 
         # Creating multiple branches
         self.branches = nn.ModuleList([BranchNetwork(128, output_size) for _ in range(num_branches)])
@@ -37,6 +44,8 @@ class SphinxModel(nn.Module):
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
         x = torch.relu(self.fc3(x))
+        x = torch.relu(self.fc4(x))
+        x = self.fc5(x)
         outputs = [branch(x) for branch in self.branches]
         return torch.stack(outputs, dim=1)
     
@@ -123,7 +132,7 @@ if __name__ == '__main__':
     model, optimizer, criterion = create_model(2**N2, num_branches, output_size)
 
     # Train model
-    batch_size = 32
-    epochs = 10
+    batch_size = 64
+    epochs = 100
     train(batch_size, epochs, model, optimizer, criterion, x_train, y_train, num_branches)
     

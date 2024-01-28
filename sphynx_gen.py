@@ -4,6 +4,8 @@ from qiskit import QuantumCircuit
 from qiskit.quantum_info import Operator
 # from qiskit.extensions import UnitaryGate
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import matplotlib.colors as colors
 from tqdm import trange
 from qiskit import transpile
 import os, pickle
@@ -215,7 +217,7 @@ def gen_random_circuit(N, max_depth, N2=None, plot=False, check_fidelity=False):
         for i in range(N, N2):
             qc.id(i)
 
-    optimized_circuit = transpile(qc, optimization_level=3, basis_gates=GATE_SET)
+    optimized_circuit = transpile(qc, optimization_level=1, basis_gates=GATE_SET)
     #                                                                      1,   2,    3,   4,    5,6
     
     if check_fidelity:
@@ -225,23 +227,35 @@ def gen_random_circuit(N, max_depth, N2=None, plot=False, check_fidelity=False):
         target = Operator(qc).data
         # compute the norm of the difference
         norm = np.linalg.norm(matrix - target)
-        # normalize by the dimension of the matrix
-        norm /= matrix.shape[0]
+
+
+        # compute total gate speedup
+        # get total num gates before and after
+        num_gates_before = len(qc.data)
+        num_gates_after = len(optimized_circuit.data)
+
+        # compute speedup
+        speedup = (num_gates_before - num_gates_after) / num_gates_before
+
+
         # print the norm
         if plot:
             print('norm of difference:', norm)
 
     if plot:
-        optimized_circuit.draw('mpl')
-        # get timestamp to save figure
+        # plot and save the original and optimized circuits on the same figure
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+        qc.draw('mpl', ax=ax1)
+        optimized_circuit.draw('mpl', ax=ax2)
         if not os.path.exists('figures'):
             os.makedirs('figures')
         plt.savefig(os.path.join('figures', f'random_circuit_{N}_{max_depth}_{N2}_{time()}.png'))
-        plt.show()
+        
+        
     if not check_fidelity:
         return optimized_circuit
     else:
-        return optimized_circuit, norm
+        return optimized_circuit, norm, speedup
 
 ## decompose random circuit ##
 def random_decompose(N, max_depth, N2=None, target=None, plot=False):
@@ -342,23 +356,28 @@ def benchmark_transpile(num = 100, N0=3, Nf = 10, min_max_depth=10, max_max_dept
         for depth in range(min_max_depth, max_max_depth+1, depth_steps):
             # create list of norms
             norms = []
+            speedups = []
             for i in trange(num):
                 # generate random circuit
                 if N2 is None:
-                    _, norm = gen_random_circuit(N, depth, check_fidelity=True)
+                    _, norm, speedup = gen_random_circuit(N, depth, check_fidelity=True)
                 else:
-                    _, norm = gen_random_circuit(N, depth, N2=N2, check_fidelity=True)
+                    _, norm, speedup = gen_random_circuit(N, depth, N2=N2, check_fidelity=True)
                 # compute eigenvalues
                 norms.append(norm)
+                speedups.append(speedup)
 
             # compute mean and sem
             mean = np.mean(norms)
             sem = np.std(norms) / np.sqrt(len(norms))
 
-            print(f'N: {N}, depth: {depth}, mean: {mean}, sem: {sem}')
+            mean_speedup = np.mean(speedups)
+            sem_speedup = np.std(speedups) / np.sqrt(len(speedups))
+
+            print(f'N: {N}, depth: {depth}, mean: {mean}, sem: {sem}, mean speedup: {mean_speedup}, sem speedup: {sem_speedup}')
 
             # store in dictionary
-            results[(N, depth)] = (mean, sem)
+            results[(N, depth)] = (mean, sem, mean_speedup, sem_speedup)
 
     # save results
     if not os.path.exists('results'):
@@ -388,12 +407,31 @@ def plot_benchmark_transpile(results_dict):
     # plot
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
-    ax.scatter(Ns, depths, means, c=sems, cmap='viridis')
+    # Normalize for the colormap
+    norm = colors.Normalize(vmin=min(sems), vmax=max(sems))
+
+    # Create a scatter plot
+    sc = ax.scatter(Ns, depths, means, c=sems, cmap='viridis', norm=norm)
+
+    # Create a ScalarMappable and initialize a data structure
+    mappable = cm.ScalarMappable(norm=norm, cmap=sc.cmap)
+    mappable.set_array(sems)
+
+    # Add colorbar, explicitly associating it with the 3D axes
+    cbar = fig.colorbar(mappable, ax=ax, shrink=0.5, aspect=5)
+    cbar.set_label('SEM of Norm of Difference')
+
+    # Get the current position of the colorbar and shift it to the right
+    cbar_ax = cbar.ax
+    position = cbar_ax.get_position()
+    cbar_ax.set_position([position.x0 + 0.05, position.y0, position.width, position.height])
+
+
     ax.set_xlabel('Number of Qubits')
     ax.set_ylabel('Depth')
     ax.set_zlabel('Mean of Norm of Difference')
+    plt.savefig(os.path.join('figures', f'benchmark_transpile_{Ns[0]}_{Ns[-1]}_{depths[0]}_{depths[-1]}_{len(depths)}.png'))
     plt.show()
-
 ##### build dataset #####
 def build_dataset(total_num, N2=10, N0=3, max_depth=100):
     '''Builds dataset of total_num random circuits with randomized N qubits in N2 qubit hilbert space and random depth.
@@ -482,5 +520,6 @@ if __name__ == '__main__':
     # N = 3
     # max_depth = 20
     # build_dataset(100000, N0=N, N2=N, max_depth=max_depth)
-    benchmark_transpile(num=1000)
-    
+    benchmark_transpile(num=100)
+    # plot_benchmark_transpile(np.load(os.path.join('results', 'benchmark_transpile_3_10_10_100_10_None.npy'), allow_pickle=True).item())
+    # gen_random_circuit(3, 5, plot=True, check_fidelity=True)
