@@ -87,7 +87,7 @@ def get_SYK(n_majorana, J=2):
 
     # Parameters
     n_qubits = n_majorana // 2
-    var = factorial(3) * J**2 / (n_qubits**3)
+    var = factorial(3) * J**2 / (n_majorana**3)
     J = np.random.normal(0, np.sqrt(var), (n_majorana, n_majorana, n_majorana, n_majorana))
 
     # Ensure Jijkl is antisymmetric
