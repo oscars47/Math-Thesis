@@ -4,8 +4,7 @@ from qiskit import transpile, QuantumCircuit
 from qiskit.quantum_info import Operator
 from qiskit.opflow import I, X, Y, Z, PauliSumOp, PauliOp
 import matplotlib.pyplot as plt
-import os
-from time import time
+import os, time
 from math import factorial
 
 ## ------ visualization ------- ##
@@ -30,9 +29,9 @@ def print_matrix(matrix, show=False, save=False, save_name=None):
             os.makedirs(path)
         # timestamp
         if save_name is None:
-            plt.savefig(os.path.join(path, f'{time.now()}.pdf'))
+            plt.savefig(os.path.join(path, f'{time.time()}.pdf'))
         else:
-            plt.savefig(os.path.join(path, save_name+str(time.now())+'.pdf'))
+            plt.savefig(os.path.join(path, save_name+str(time.time())+'.pdf'))
     if show:
         plt.show()
     
@@ -210,8 +209,8 @@ def get_SYK(n_majorana, J=2):
     print('Gate speedup:', gate_speedup)
 
     # print out both matrices
-    print_matrix(H_circ_matrix)
-    print_matrix(H_opt_circ_matrix)
+    print_matrix(H_circ_matrix, save=True, save_name='H_circ')
+    print_matrix(H_opt_circ_matrix, save=True, save_name='H_opt_circ')
 
     return fidelity, gate_speedup
 
@@ -234,5 +233,5 @@ def benchmark_SYK(num, n_majorana):
 
 if __name__ == "__main__":
     # get_SYK(12)
-    benchmark_SYK(10, 20) # N = 10 qubits
+    benchmark_SYK(10, 12) # N = 10 qubits
     print('Done!')
