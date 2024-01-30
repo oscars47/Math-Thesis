@@ -58,8 +58,8 @@ def trotter_suzuki_circuit(pauli_sum_op, time, steps):
     delta_t = time / steps
     for _ in range(steps):
         for term in pauli_sum_op:
-            # print('term:', term.coeff, )
-            angle = -1j * term.primitive.coeffs[0] * delta_t
+            # print('term:', term.primitive.coeffs[0] )
+            angle = -1j * np.abs(term.primitive.coeffs[0]) * delta_t # sometimes Qiskit will autoconvert YX = iZ thus adding a phase, so we need to take the abs
             angle = np.imag(angle)
             # print('angle:', angle)
             pauli_strings = term.primitive.paulis.to_labels()
