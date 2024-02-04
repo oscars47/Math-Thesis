@@ -76,12 +76,14 @@ def trotter_suzuki_circuit(pauli_sum_op, time, steps):
                         # 'I' does nothing
     return qc
 
-def get_SYK(n_majorana, J=2):
+def get_SYK(n_majorana, J=2, save=False, save_name=None):
     '''Returns the SYK Hamiltonian as a PauliSumOp object in Qiskit.
 
     Params:
         N (int): number of Majorana fermions
         J (float): effective variance
+        save (bool): whether to save the matrix representation of the circuit
+        save_name (str): name of the file to save as
     
     '''
 
@@ -175,9 +177,9 @@ def get_SYK(n_majorana, J=2):
                         H += J[i, j, k, l] * term
     
     # convert to unitary time evolution
-    time = 1.0
+    tf = 1.0
     steps = 20
-    H_circ = trotter_suzuki_circuit(H, time, steps)
+    H_circ = trotter_suzuki_circuit(H, tf, steps)
 
     # print('H_circ:', H_circ)
 
@@ -199,6 +201,10 @@ def get_SYK(n_majorana, J=2):
     H_circ_matrix = Operator(H_circ).data
     H_opt_circ_matrix = Operator(H_opt_circ).data
 
+    # get eigenvalues and eigenvectors of optimized circuit
+    eigvals, eigvecs = np.linalg.eig(H_opt_circ_matrix)
+    print('Eigenvalues:', eigvals)
+
     # fidelity
     fidelity = np.linalg.norm(H_circ_matrix - H_opt_circ_matrix)
 
@@ -211,6 +217,21 @@ def get_SYK(n_majorana, J=2):
     # print out both matrices
     print_matrix(H_circ_matrix, save=True, save_name='H_circ')
     print_matrix(H_opt_circ_matrix, save=True, save_name='H_opt_circ')
+
+    if save:
+        # add to 'syk_qiskit' folder
+        path = os.path.join(os.getcwd(), 'syk_qiskit')
+        if not os.path.exists(path):
+            os.makedirs(path)
+        # timestamp
+        if save_name is None:
+            np.save(os.path.join(path, f'H_circ_{time.time()}'), H_circ_matrix)
+            np.save(os.path.join(path, f'H_opt_circ_{time.time()}'), H_opt_circ_matrix)
+            np.save(os.path.join(path, f'eigvals_{time.time()}'), eigvals)
+        else:
+            np.save(os.path.join(path, save_name+f'H_circ_{time.time()}'), H_circ_matrix)
+            np.save(os.path.join(path, save_name+f'H_opt_circ_{time.time()}'), H_opt_circ_matrix)
+            np.save(os.path.join(path, save_name+f'eigvals_{time.time()}'), eigvals)
 
     return fidelity, gate_speedup
 
@@ -232,6 +253,6 @@ def benchmark_SYK(num, n_majorana):
     print(f'Average gate speedup: {avg_gate_speedup} ± {sem_gate_speedup}')
 
 if __name__ == "__main__":
-    # get_SYK(12)
-    benchmark_SYK(10, 12) # N = 10 qubits
-    print('Done!')
+    # print(time.time())
+    get_SYK(20, save=True, save_name='SYK_20')
+    # benchmark_SYK(10, 20) # N = 10 qubits
