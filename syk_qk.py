@@ -228,10 +228,12 @@ def get_SYK(n_majorana, J=2, save=False, save_name=None):
             np.save(os.path.join(path, f'H_circ_{time.time()}'), H_circ_matrix)
             np.save(os.path.join(path, f'H_opt_circ_{time.time()}'), H_opt_circ_matrix)
             np.save(os.path.join(path, f'eigvals_{time.time()}'), eigvals)
+            np.save(os.path.join(path, f'eigvecs_{time.time()}'), eigvecs)
         else:
             np.save(os.path.join(path, save_name+f'H_circ_{time.time()}'), H_circ_matrix)
             np.save(os.path.join(path, save_name+f'H_opt_circ_{time.time()}'), H_opt_circ_matrix)
             np.save(os.path.join(path, save_name+f'eigvals_{time.time()}'), eigvals)
+            np.save(os.path.join(path, save_name+f'eigvecs_{time.time()}'), eigvecs)
 
     return fidelity, gate_speedup
 
