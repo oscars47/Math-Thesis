@@ -3,6 +3,11 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+## 2/5-6/24
+* finished rest of wormhole protocol using strictly QC representation (up until computing I)
+** added get_TFD(), get_bell_pair(), get_expV(), and implement_protocol() which puts it all together
+* added zlokapa_code.py which has snippets from Zlokapa's thesis (ended up not using)
+
 ## 2/4/24
 * reorganizing syk_qk.py so that get_SYK returns the H pauli_sum_op object.
 * added get_TFD(), which depends on get_bell_pair(), time_reverse(), time_reverse_op().
