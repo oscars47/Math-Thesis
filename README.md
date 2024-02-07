@@ -3,6 +3,18 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+## 2/7/24
+* testing implement_protocol() with variety of changes:
+** running 10, 200 revealed a kind of noisy cloud, so:
+** added option to fix t0 param to 2.8 like in wormhole paper
+** updated time_evolve to take time_step argument in place of steps so the time step is fixed, so at later time values we are still precise
+** i think i was using the wrong register for the Ipt: should only be 0 and 2*N-1? no, what
+** selective swapping of only the bell term part
+* realized rhoL, rhoR, rhoLR not PSD. circuit not unitary. tried removing the swap circuits and still not unitary. in particular TFD is *not* unitary. both the expH and ent are not unitary. 
+** issue was i was using DensityMatrix() on the circuit, but need to use Operator().data. need to revisit and fix.
+** no duh, the expH won't be unitary bc no factor of 1j. 
+ 
+
 ## 2/5-6/24
 * finished rest of wormhole protocol using strictly QC representation (up until computing I)
 ** added get_TFD(), get_bell_pair(), get_expV(), and implement_protocol() which puts it all together

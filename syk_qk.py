@@ -168,8 +168,16 @@ def trotter_suzuki_circuit(pauli_sum_op, time, steps):
                         # 'I' does nothing
     return qc
 
-def time_evolve(H, tf=1, steps=20, benchmark=False, save=False, save_name=None):
+def time_evolve(H, tf=1, steps=None, tev_dt = None, benchmark=False, save=False, save_name=None):
     '''Time evolves the Hamiltonian H from t0 to tf in steps.'''
+
+    # make sure one of steps or tev_dt is not None
+    if steps is None and tev_dt is None:
+        raise ValueError('Either steps or tev_dt must be specified.')
+    
+    if steps is None and tev_dt is not None:
+        steps = int(np.ceil(tf / tev_dt))
+
     print('Time evolving...')
     # get the circuit 
     H_circ = trotter_suzuki_circuit(H, tf, steps)
@@ -225,7 +233,7 @@ def time_evolve(H, tf=1, steps=20, benchmark=False, save=False, save_name=None):
     else:
         return H_opt_circ # just return the optimized circuit
 
-def get_TFD(H, beta=4, steps=20):
+def get_TFD(H, beta=4, tev_dt=1e-1):
     '''Takes in pauli sum op and returns the TFD state. Assumes time reversal applied first. Performs computation as quantum circuit. Applies Trotter-Suzuki with imag time evolve the Hamiltonian.
 
     Params:
@@ -234,13 +242,13 @@ def get_TFD(H, beta=4, steps=20):
         steps (int): number of steps for Trotter-Suzuki
         '''
 
-    # exponentiate using trotter suzuki
-    tfd_i = trotter_suzuki_circuit(H, -1j*beta, steps)
-
     H_exp = -1j*beta/4 * H
 
     # use trotter suzuki to get the circuit
-    expH = time_evolve(H_exp, steps)
+    expH = time_evolve(H_exp, tev_dt=tev_dt)
+
+    # is unitary
+    print('Is expH unitary:', np.allclose(DensityMatrix(expH).data @ DensityMatrix(expH).data.T.conj(), np.eye(2**H.num_qubits)))
 
     # create a circuit with n_qubits on the left and n_qubits on the right, appended together
     ent = QuantumCircuit(2*H.num_qubits)
@@ -250,6 +258,10 @@ def get_TFD(H, beta=4, steps=20):
         ent.h(i)
         ent.cx(i, i+H.num_qubits)
 
+    # is unitary
+    print('Is ent unitary:', np.allclose(Operator(ent).data @ Operator(ent).data.T.conj(), np.eye(2**(2*H.num_qubits))))
+    print('ent matrix', Operator(ent).data @ Operator(ent).data.T.conj())
+
     # apply expH to both halves; need to shift the qubit indices by the desired amount
     expH2 = QuantumCircuit(2*H.num_qubits)
     for gate in expH.data:
@@ -257,6 +269,9 @@ def get_TFD(H, beta=4, steps=20):
         expH2.append(gate[0], qubits)
         qubits = [q + H.num_qubits for q in qubits]
         expH2.append(gate[0], qubits)
+
+    # is unitary
+    print('Is expH2 unitary:', np.allclose(Operator(expH2).data @ Operator(expH2).data.T.conj(), np.eye(2**(2*H.num_qubits))))
     
     # now compose
     tfd = expH2.compose(ent)
@@ -294,25 +309,48 @@ def get_expV(n_majorana, mu =-12, steps=20):
     return expV
 
 ## ------ main function to implment the protocol ------- ##
-def implement_protocol(n_majorana, tmin=0, tmax=10, steps = 20, mu=-12, beta=4):
-    '''Computes the correlation K for n_majorana fermions at time t, interaction param mu, and inverse temperature beta'''
+def implement_protocol(n_majorana, tmin=0, tmax=10, steps = 20, mu=-12, beta=4, fixed_t0=True, tev_dt =1e-1):
+    '''Computes the correlation K for n_majorana fermions at time t, interaction param mu, and inverse temperature beta.
+
+    Params:
+        n_majorana (int): number of Majorana fermions
+        tmin (float): minimum time
+        tmax (float): maximum time
+        steps (int): number of steps for Trotter-Suzuki
+        mu (float): interaction parameter
+        beta (float): inverse temperature
+        fixed_t0 (bool): whether to fix t0 to 2.8
+    
+    '''
 
     # get the Hamiltonian
     H = get_SYK(n_majorana) # pauli sum op
 
-
     # initialize list of mutual infos
     I_ls = []
 
-    delta_t = (tmax - tmin) / steps
+    delta_t = (tmax - tmin) / steps # what to iterate the outer loop over
+
+    # check tev_dt not bigger than delta_t
+    if tev_dt > delta_t:
+        tev_dt = delta_t
+
+    if fixed_t0:
+        t0 = 2.8
 
     for t in np.arange(tmin, tmax, delta_t):
         ## STEP 1: generate TFD and apply negative time evolution on L
         # make tfd
-        tfd = get_TFD(H, beta) # quantum circuit
+        tfd = get_TFD(H, beta, tev_dt=tev_dt) # quantum circuit
+
+        # check if unitary
+        # print('Is tfd unitary:', np.allclose(DensityMatrix(tfd).data @ DensityMatrix(tfd).data.T.conj(), np.eye(2**(2*H.num_qubits))))
 
         # apply backwards time evolution to L part of tfd
-        tev_nt0 = time_evolve(H, tf=-t, steps=steps) # quantum circuit
+        if not fixed_t0:
+            tev_nt0 = time_evolve(H, tf=-t, tev_dt=tev_dt) # quantum circuit
+        else:
+            tev_nt0 = time_evolve(H, tf=-t0, tev_dt=tev_dt)
         # apply this circuit to the tfd, but only left
         tev_nt0_big = QuantumCircuit(2*H.num_qubits)
         for gate in tev_nt0.data:
@@ -321,46 +359,29 @@ def implement_protocol(n_majorana, tmin=0, tmax=10, steps = 20, mu=-12, beta=4):
 
         # now compose with tfd
         tfd = tfd.compose(tev_nt0_big)
-        # print(tfd)
 
         ## STEP 2: swap in R part of bell pair into tfd
-    # get bell pair P and Q
-        # swap in R part of bell pair into tfd
-        # # get the last half of the qubits in bell pair
-        # R_part_bp = QuantumCircuit(2*H.num_qubits)
-        # # start indexing from H.num_qubits
-        # for i in range(H.num_qubits, 2*H.num_qubits):
-        #     gate = bell_pair.data[i]
-        #     qubits = [q.index for q in gate[1]]
-        #     R_part_bp.append(gate[0], qubits)
-
-        # # apply the swap
-        # # get only the R part of the tfd
-        # R_part_tfd = QuantumCircuit(H.num_qubits)
-        # for i in range(H.num_qubits, 2*H.num_qubits):
-        #     gate = tfd.data[i]
-        #     qubits = [q.index for q in gate[1] + H.num_qubits] # start applying at the right
-        #     R_part_tfd.append(gate[0], qubits)
-        
+        # get bell pair P and Q
         bell_pair = get_bell_pair(H.num_qubits) # quantum circuit
 
-        # apply swap gate
+        # apply swap gate between the R term in bell state and the corresponding qubit in the tfd
         swap_c = QuantumCircuit(2*H.num_qubits)
-        for i in range(H.num_qubits):
-            swap_c.swap(i + H.num_qubits, i) # R swapped to L
-
-        # print(swap_c)
+        # for i in range(H.num_qubits):
+        #     swap_c.swap(i + H.num_qubits, i) # R swapped to L
+        # swap_c.swap(H.num_qubits, 0) # R swapped to L
 
         # now compose
         R_part_bp = bell_pair.compose(swap_c)
 
         # now compose with tfd
         tfd_swapped = R_part_bp.compose(tfd)
-        # print(tfd_swapped)
 
         ## STEP 3: apply forward time evolution to L part of tfd
         # apply forward time evolution to L part of tfd
-        tev_pt0 = time_evolve(H, tf=t, steps=steps) # quantum circuit
+        if not fixed_t0:
+            tev_pt0 = time_evolve(H, tf=t, tev_dt=tev_dt) # quantum circuit
+        else:
+            tev_pt0 = time_evolve(H, tf=t0, tev_dt=tev_dt)
         # apply this circuit to the tfd, but only left
         tev_pt0_big = QuantumCircuit(2*H.num_qubits)
         for gate in tev_pt0.data:
@@ -394,32 +415,13 @@ def implement_protocol(n_majorana, tmin=0, tmax=10, steps = 20, mu=-12, beta=4):
 
         # now compose with tfd
         tfd_pt1 = tfd_expV.compose(tev_pt1_big)
-        print(tfd_pt1)
 
         ## STEP 6: swap out R part of tfd
-        # # get the first half of the qubits in bell pair
-        # L_part_bp = QuantumCircuit(2*H.num_qubits)
-        # for i in range(H.num_qubits):
-        #     gate = bell_pair.data[i]
-        #     qubits = [q.index for q in gate[1]]
-        #     L_part_bp.append(gate[0], qubits)
-
-        # # get R part of tfd
-        # R_part_tfd_pt1 = QuantumCircuit(2*H.num_qubits)
-        # for i in range(H.num_qubits, 2*H.num_qubits):
-        #     gate = tfd_pt1.data[i]
-        #     qubits = [q.index for q in gate[1] + H.num_qubits] # start applying at the right
-        #     R_part_tfd_pt1.append(gate[0], qubits)
-
-        # # compose
-        # tfd_final = L_part_bp.compose(R_part_tfd_pt1)
-
         # apply swap gate
         swap_c = QuantumCircuit(2*H.num_qubits)
-        for i in range(H.num_qubits):
-            swap_c.swap(i, i +H.num_qubits) # L swapped to R
-
-        # print(swap_c)
+        # for i in range(H.num_qubits):
+        #     swap_c.swap(i, i +H.num_qubits) # L swapped to R
+        # swap_c.swap(0, H.num_qubits) # L swapped to R
         
         # now compose
         tfd_swap_out = tfd_pt1.compose(swap_c)  # quantum circuit
@@ -438,11 +440,26 @@ def implement_protocol(n_majorana, tmin=0, tmax=10, steps = 20, mu=-12, beta=4):
         # convert to DensityMatrix
         tfd_final_dens = tfd_final_dens.data
 
+        print('size of tfd_final_dens:', tfd_final_dens.shape)
+        print('size of 2^H.num_qubits:', 2**(2*H.num_qubits))
 
-        # get the reduced density matrices
-        rho_L = partial_trace(state = tfd_final_dens, qargs = range(H.num_qubits))
-        rho_R = partial_trace(state = tfd_final_dens, qargs = range(H.num_qubits, 2*H.num_qubits))
+        # check operation is unitary
+        print('Is tfd_final unitary:', np.allclose(tfd_final_dens @ tfd_final_dens.T.conj(), np.eye(2**(2*H.num_qubits))))
 
+        # get the reduced density matrices; i want to only keep the first and last qubits
+        rho_L = partial_trace(tfd_final_dens, qargs=[0])
+        rho_R = partial_trace(tfd_final_dens, qargs=[2*H.num_qubits-1])
+
+        # confirm trace of rho_L and rho_R is 1
+        print('Trace of rho_L:', np.trace(rho_L))
+        print('Trace of rho_R:', np.trace(rho_R))
+        print('Trace of rho_LR:', np.trace(tfd_final_dens))
+
+        # confirm PSD
+        print('Is rho_L PSD:', np.all(np.linalg.eigvals(rho_L) >= 0))
+        print('Is rho_R PSD:', np.all(np.linalg.eigvals(rho_R) >= 0))
+        print('Is rho_LR PSD:', np.all(np.linalg.eigvals(tfd_final_dens) >= 0))
+       
         # get the joint density matrix
         rho_LR = tfd_final_dens
 
@@ -452,11 +469,34 @@ def implement_protocol(n_majorana, tmin=0, tmax=10, steps = 20, mu=-12, beta=4):
         I_ls.append(I)
 
     # plot the mutual info
-    plt.plot(np.arange(tmin, tmax, delta_t), I_ls)
+    plt.figure()
+    plt.scatter(np.arange(tmin, tmax, delta_t), I_ls)
     plt.xlabel('Time')
     plt.ylabel('Mutual Info')
+    # make sure not to overwrite the figure
+    fig_path = os.path.join('figures', f'Iplot_{n_majorana}_{tmin}_{tmax}_{steps}_{mu}_{beta}.pdf')
+
+    if not os.path.exists('figures'):
+        os.makedirs('figures')
+
+    if os.path.exists(fig_path):
+        # add a timestamp
+        plt.savefig(os.path.join('figures', f'Iplot_{n_majorana}_{tmin}_{tmax}_{steps}_{mu}_{beta}'+str(time.time())+'.pdf'))
+        
+    plt.savefig(os.path.join('figures', f'Iplot_{n_majorana}_{tmin}_{tmax}_{steps}_{mu}_{beta}.pdf'))
     plt.show()
+
+    # save I_ls to results
+    if not os.path.exists('results'):
+        os.makedirs('results')
+    Ils_path = os.path.join('results', f'I_ls_{n_majorana}_{tmin}_{tmax}_{steps}_{mu}_{beta}.npy')
+    if os.path.exists(Ils_path):
+        # add a timestamp
+        np.save(os.path.join('results', f'I_ls_{n_majorana}_{tmin}_{tmax}_{steps}_{mu}_{beta}'+str(time.time())+'.npy'), I_ls)
+    I_ls = np.array(I_ls)
     
+    np.save(os.path.join('results', f'I_ls_{n_majorana}_{tmin}_{tmax}_{steps}_{mu}_{beta}'), I_ls)
+
     return I_ls
 
 ## ------- testing ------- ##
@@ -477,4 +517,4 @@ def benchmark_SYK(num, n_majorana):
     print(f'Average gate speedup: {avg_gate_speedup} ± {sem_gate_speedup}')
 
 if __name__ == "__main__":
-    implement_protocol(12, steps = 50)
+    implement_protocol(10, steps = 10)
