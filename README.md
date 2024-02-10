@@ -12,6 +12,15 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 ** correctly using Aer engine to simulate the measurement of the quantum state resulting from the circuit
 ** issue is that while rho_L and rho_R are PSD, rho_LR is not PSD
 ** confirmed the density matrices are valid and calculated mutual info using qiskit.quantum_info.entropy(). got a sensible value, so now testing full protocol.
+* got same value of I_pt the entire time. realized need to make P, Q, T as separate registers from the rest of the N + N which represent the two entangled systems for the tfd. 
+** implemented this, but now getting mutual info = 0.
+** realized need a minus sign on mu so that e^i mu V is implemented w trotter suzuki and not e^-imu V. doesn't solve issue of 0 mut info tho.
+** fixed SWAP to only apply to qubits 1, 2 and total_num-2, total_num-1. still mutual info = 0.
+** tried changing J but still no info
+** tried inc trotter steps, no change
+** realized from circuit diagrams the swap happens BEFORE ALL cnot gates
+** WHERE TO PUT THE SWAP GATES??
+
 
 
 ## 2/7/24

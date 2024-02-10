@@ -116,6 +116,7 @@ def get_SYK(n_majorana, J=2, left=True):
 
     # Parameters
     n_qubits = n_majorana // 2
+
     var = factorial(3) * J**2 / (n_majorana**3)
     J = np.random.normal(0, np.sqrt(var), (n_majorana, n_majorana, n_majorana, n_majorana))
 
@@ -266,18 +267,6 @@ def get_TFD(H, beta=4, steps=20):
     opt_tfd = transpile(tfd, optimization_level=1)
 
     return opt_tfd # is already normalized bc quantum circuit
-
-def get_bell_pair(n_qubits):
-    '''Returns the bell state in 2N qubit hilbert space using quantum circuit'''
-    qc = QuantumCircuit(2*n_qubits) # account for L and R
-    # qc.h(0)
-    # qc.cx(0, 1)
-     # Apply Hadamard and CNOT gates to create Bell pairs
-    for i in range(0, n_qubits, 2):
-        qc.h(i)  # Apply Hadamard to the first qubit of the pair
-        qc.cx(i, i+1)  # Apply CNOT with the first qubit as control and the second as target
-
-    return qc
     
 ## ------ Apply potential ------- ##
 def get_expV(n_majorana, mu =-12, steps=20):
@@ -293,105 +282,81 @@ def get_expV(n_majorana, mu =-12, steps=20):
         V += 1/(4*n_majorana) * term
 
     # scale by mu
-    V = mu * V
+    V = -mu * V
 
     # compute exponential with trotter suzuki
     expV = time_evolve(V, tf=1, steps=steps)
     return expV
 
 ## ------ main function to implment the protocol ------- ##
-def protocol_round(H, n_majorana, t, mu=-12, beta=4, steps=20):
+def protocol_round(H, tfd, expV, tev_nt0, tev_pt0, t,steps=100):
     '''Implements a single round of the the wormhole protocol for the SYK model with n_majorana fermions at time t, interaction param mu, and inverse temperature beta.'''
     ## STEP 1: generate TFD and apply negative time evolution on L
     # make tfd
-    tfd = get_TFD(H, beta) # quantum circuit
+    total_circuit = QuantumCircuit(2*H.num_qubits + 3)
+    ## STEP 2: swap in register Q of bell pair into tfd
+    total_circuit.h(0)
+    total_circuit.cx(0, 1)
+
+    # set the tfd within the larger full circuit with registers P, Q before it and T at the end
+    for gate in tfd.data:
+        qubits = [q.index + 2 for q in gate[1]]
+        total_circuit.append(gate[0], qubits) # start at 2 to account for the extra registers
+    # leaves the last register T as 0
+        
+    # plot the tfd
+    total_circuit.draw('mpl').savefig('results/tfd.pdf')
+
 
     # apply backwards time evolution to L part of tfd
-    tev_nt0 = time_evolve(H, tf=-t, steps=steps) # quantum circuit
-    # apply this circuit to the tfd, but only left
-    tev_nt0_big = QuantumCircuit(2*H.num_qubits)
-    for gate in tev_nt0.data:
-        qubits = [q.index for q in gate[1]]
-        tev_nt0_big.append(gate[0], qubits)
+    for gate in tev_nt0.data: 
+        qubits = [q.index + 2 for q in gate[1]]
+        total_circuit.append(gate[0], qubits)
 
-    # now compose with tfd
-    tfd = tfd.compose(tev_nt0_big)
-    # print(tfd)
+    # plot the tfd with negative time evolution
+    total_circuit.draw('mpl').savefig('results/tfd_neg_time.pdf')
 
-    ## STEP 2: swap in register Q of bell pair into tfd
-    bell_pair = get_bell_pair(H.num_qubits) # quantum circuit
-
-    # apply swap gate
-    swap_c = QuantumCircuit(2*H.num_qubits)
-
-    # Apply SWAP gates between corresponding qubits in the two copies
+    
+    # Apply SWAP gates between Q and left half of the TFD
     for i in range(H.num_qubits):
-        swap_c.swap(i, i + H.num_qubits)  # Swap the qubits in the two copies
+        total_circuit.swap(i, i + H.num_qubits)
+    # total_circuit.swap(1, 2)
 
-    # now compose
-    R_part_bp = bell_pair.compose(swap_c)
-
-    # now compose with tfd
-    tfd_swapped = R_part_bp.compose(tfd)
-    # print(tfd_swapped)
+    # plot the tfd with swapped in bell pair
+    total_circuit.draw('mpl').savefig('results/tfd_swap.pdf')  
 
     ## STEP 3: apply forward time evolution to L part of tfd
-    # apply forward time evolution to L part of tfd
-    tev_pt0 = time_evolve(H, tf=t, steps=steps) # quantum circuit
-    # apply this circuit to the tfd, but only left
-    tev_pt0_big = QuantumCircuit(2*H.num_qubits)
     for gate in tev_pt0.data:
-        qubits = [q.index for q in gate[1]]
-        tev_pt0_big.append(gate[0], qubits)
-
-    # now compose with tfd
-    tfd_pt0 = tfd_swapped.compose(tev_pt0_big)
+        qubits = [q.index +2 for q in gate[1]]
+        total_circuit.append(gate[0], qubits)
 
     ## STEP 4: apply potential to both parts of tfd
-    expV = get_expV(n_majorana, mu, steps) # quantum circuit
-    # apply to both
-    expV2 = QuantumCircuit(2*H.num_qubits)
     for gate in expV.data:
-        qubits = [q.index for q in gate[1]]
-        expV2.append(gate[0], qubits)
+        qubits = [q.index +2  for q in gate[1]]
+        total_circuit.append(gate[0], qubits)
         qubits = [q + H.num_qubits for q in qubits]
-        expV2.append(gate[0], qubits)
-
-    # now compose
-    tfd_expV = tfd_pt0.compose(expV2)
+        total_circuit.append(gate[0], qubits)
 
     ## STEP 5: apply forward time evolution by t1 to R part of tfd
-    # apply forward time evolution to R part of tfd
     tev_pt1 = time_evolve(H, tf=t, steps=steps) # quantum circuit
-    # apply this circuit to the tfd, but only right
-    tev_pt1_big = QuantumCircuit(2*H.num_qubits)
     for gate in tev_pt1.data:
-        qubits = [q.index + H.num_qubits for q in gate[1]]
-        tev_pt1_big.append(gate[0], qubits)
+        qubits = [q.index + H.num_qubits +2 for q in gate[1]]
+        total_circuit.append(gate[0], qubits)
 
-    # now compose with tfd
-    tfd_pt1 = tfd_expV.compose(tev_pt1_big)
-    print(tfd_pt1)
-
-    ## STEP 6: swap out R part of tfd
-
-    # apply swap gate
-    swap_c = QuantumCircuit(2*H.num_qubits)
-    # Apply SWAP gates between corresponding qubits in the two copies
+    ## STEP 6: swap out r to T
     for i in range(H.num_qubits):
-        swap_c.swap(i + H.num_qubits, i)  # Swap the qubits in the two copies
-    
-    # now compose
-    tfd_swap_out = tfd_pt1.compose(swap_c)  # quantum circuit
+        total_circuit.swap(i + H.num_qubits, total_circuit.num_qubits -1)
+    # total_circuit.swap(7,total_circuit.num_qubits -1)
     
     # optimize
-    tfd_final = transpile(tfd_swap_out, optimization_level=1)
+    tfd_final = transpile(total_circuit, optimization_level=1)
     print(tfd_final)
+    # save image
+    tfd_final.draw('mpl').savefig(f'results/tfd_final_{t}.pdf')
     print('number of gates:', tfd_final.count_ops())
 
     ## STEP 7: compute the mutual info
-    # I = S(L) + S(R) - S(LR)
-    # S(L) = S(R) = -Tr(ρ_L log ρ_L) = -Tr(ρ_R log ρ_R) = -Tr(ρ_LR log ρ_LR)
+    # I = S(R) + S(T) - S(TR)
 
     # get the density matrix
     # Run the circuit on a statevector simulator backend
@@ -409,44 +374,58 @@ def protocol_round(H, n_majorana, t, mu=-12, beta=4, steps=20):
     # print('is valid:', density_matrix.is_valid())
 
     # get the reduced density matrices
-    rho_L = partial_trace(state = density_matrix, qargs = range(H.num_qubits))
-    rho_R = partial_trace(state = density_matrix, qargs = range(H.num_qubits, 2*H.num_qubits))
-
-    # get the joint density matrix
-    rho_LR = density_matrix
-
-    print('first part of I', -np.trace(rho_L @ np.log(rho_L)) - np.trace(rho_R @ np.log(rho_R)))
+    rho_P = partial_trace(state = density_matrix, qargs = range(1, total_circuit.num_qubits))
+    rho_T = partial_trace(state = density_matrix, qargs = range(total_circuit.num_qubits-1))
+    rho_PT = partial_trace(state = density_matrix, qargs = range(1, total_circuit.num_qubits-1))
 
     # compute the mutual info
-    I = entropy(rho_L) + entropy(rho_R) - entropy(rho_LR)
-    print('Mutual info:', I)
+    I = entropy(rho_P) + entropy(rho_T) - entropy(rho_PT)
+    print(f'Mutual info {I} at time {t}')
 
     return I
 
-def implement_protocol(n_majorana, tmin=0, tmax=10, steps = 20, mu=-12, beta=4):
+def implement_protocol(n_majorana, tmin=0, tmax=10, overall_steps = 20, steps = 50, mu=-12, beta=4, t0=2.8, run_once=False, t_once = 2.8):
     '''Computes the correlation K for n_majorana fermions at time t, interaction param mu, and inverse temperature beta'''
 
     # get the Hamiltonian
-    H = get_SYK(n_majorana) # pauli sum op
+    H = get_SYK(n_majorana) 
+    tfd = get_TFD(H, beta) 
+    expV = get_expV(n_majorana, mu, steps) 
 
-    # initialize list of mutual infos
-    I_ls = []
+    if not run_once:
+        # initialize list of mutual infos
+        I_ls = []
 
-    delta_t = (tmax - tmin) / steps
+        delta_t = (tmax - tmin) / overall_steps
 
-    for t in np.arange(tmin, tmax, delta_t):
-        # compute mutual info
-        I = protocol_round(H, n_majorana, t, mu, beta, steps)
-        I_ls.append(I)
+        tev_nt0 = time_evolve(H, tf=-t0, steps=steps)
+        tev_pt0 = time_evolve(H, tf=t0, steps=steps)
 
-    # plot the mutual info
-    plt.plot(np.arange(tmin, tmax, delta_t), I_ls)
-    plt.xlabel('Time')
-    plt.ylabel('Mutual Info')
-    plt.show()
+        for t in np.arange(tmin, tmax+1, delta_t):
+            # compute mutual info
+            I = protocol_round(H, tfd, expV, tev_nt0, tev_pt0,t, steps)
+            I_ls.append(I)
+
+        # plot the mutual info
+        plt.figure()
+        plt.scatter(np.arange(tmin, tmax+1, delta_t), I_ls)
+        # draw vertical line at t0
+        plt.axvline(x=t0, color='r', linestyle='--')
+        plt.xlabel('Time')
+        plt.ylabel('Mutual Information')
+        plt.savefig('results/mutual_info.pdf')
+        # plt.show()
+
+        return I_ls
+
+    else:
+        assert t_once is not None, 'Please specify a time to run the protocol at'
+        tev_nt0 = time_evolve(H, tf=-t_once, steps=steps)
+        tev_pt0 = time_evolve(H, tf=t_once, steps=steps)
+        I = protocol_round(H, tfd, expV, tev_nt0, tev_pt0, t_once, steps)
+
+        return I
     
-    return I_ls
-
 ## ------- testing ------- ##
 def benchmark_SYK(num, n_majorana):
     '''Simulates num times of n_majorana SYK Hamiltonians and logs the average and sem fidelity and gate speedup.'''
@@ -465,8 +444,5 @@ def benchmark_SYK(num, n_majorana):
     print(f'Average gate speedup: {avg_gate_speedup} ± {sem_gate_speedup}')
 
 if __name__ == "__main__":
-    # implement_protocol(12, steps = 50)
-    n_majorana = 10
-    H = get_SYK(n_majorana)
-    t = 1
-    protocol_round(H, n_majorana, t)
+    implement_protocol(10, run_once=True, t_once=2.8)
+    # implement_protocol(10, overall_steps= 5)
