@@ -3,6 +3,17 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+## 2/9/24
+* trying to figure out the issue with TFD. I believe issue was how I was checking unitarity before. using Operator(circ).is_unitary() (added the new function, is_unitary(circ)). confirmed that TFD with imaginary time evolution is unitary.
+* need to fix swap function
+** was thinking to only swap the second qubit in bell pair to the first in tfd
+** BUT, watched video on the teleportation, and they define the SWAP operation in terms of dirac fermions: https://www.youtube.com/watch?v=ZenQViOgxDM
+** note from Jafferis and Gao: "Note that this is the ordinary SWAP operator"
+** correctly using Aer engine to simulate the measurement of the quantum state resulting from the circuit
+** issue is that while rho_L and rho_R are PSD, rho_LR is not PSD
+** confirmed the density matrices are valid and calculated mutual info using qiskit.quantum_info.entropy(). got a sensible value, so now testing full protocol.
+
+
 ## 2/7/24
 * testing implement_protocol() with variety of changes:
 ** running 10, 200 revealed a kind of noisy cloud, so:
