@@ -3,6 +3,14 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+## 2/12/25
+* still nothing on the swap gates. tried changing them to cx but no luck.
+* need to take H = Hl + Hr: doesn't fix anything....
+* wrote AZ for code. need to understand what the circuit should actually look like and why the teleportation doesn't work
+** maybe there is a tensor product in the V term between L and R? no, wouldn't make sense based on definitions.
+* actually calculating explicit swap gates based on dirac operators -- their definition of swap doesn't make sense at all dimensionally...
+* fixed definition of trotter suzuki so we multiply the angle by the step number
+
 ## 2/9/24
 * trying to figure out the issue with TFD. I believe issue was how I was checking unitarity before. using Operator(circ).is_unitary() (added the new function, is_unitary(circ)). confirmed that TFD with imaginary time evolution is unitary.
 * need to fix swap function
@@ -20,8 +28,6 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 ** tried inc trotter steps, no change
 ** realized from circuit diagrams the swap happens BEFORE ALL cnot gates
 ** WHERE TO PUT THE SWAP GATES??
-
-
 
 ## 2/7/24
 * testing implement_protocol() with variety of changes:

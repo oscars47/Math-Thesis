@@ -9,7 +9,7 @@ from math import factorial
 from scipy.linalg import expm
 
 ## ------ visualization ------- ##
-def print_matrix(matrix, show=False, save=False, save_name=None):
+def print_matrix(matrix, show=True, save=False, save_name=None):
     '''Nicely prints out matrix with color coded mag and phase.'''
     mag = np.abs(matrix)
     phase = np.angle(matrix)
@@ -64,7 +64,8 @@ def majorana_to_qubit_op(l,  num_qubits, left=True):
         left (bool): whether the Majorana operator is on the left or right side 
     
     '''
-    j = (l + 1) // 2
+    
+    j = (l + 1) // 2 
     
     # start with identity operator for all qubits
     operator_chain = [I] * num_qubits
@@ -149,7 +150,7 @@ def trotter_suzuki_circuit(pauli_sum_op, time, steps):
 
     # First-order Trotter-Suzuki approximation
     delta_t = time / steps
-    for _ in range(steps):
+    for l in range(steps):
         for term in pauli_sum_op:
             # print('term:', term.primitive.coeffs[0] )
             # need to check if delta_t is real or imaginary
@@ -157,7 +158,7 @@ def trotter_suzuki_circuit(pauli_sum_op, time, steps):
                 angle = -1j * np.abs(term.primitive.coeffs[0]) * delta_t # sometimes Qiskit will autoconvert YX = iZ thus adding a phase, so we need to take the abs
             else:
                 angle = np.abs(term.primitive.coeffs[0]) * delta_t
-            angle = np.imag(angle)
+            angle = l*np.imag(angle)
             # print('angle:', angle)
             pauli_strings = term.primitive.paulis.to_labels()
             for qubit_idx, gate_coeff in enumerate(pauli_strings):
@@ -248,9 +249,16 @@ def get_TFD(H, beta=4, steps=20):
     ent = QuantumCircuit(2*H.num_qubits)
 
     # entangle the two halves
+    # for i in range(H.num_qubits):
+    #     ent.h(i)
+    #     ent.cx(i, i+H.num_qubits)
     for i in range(H.num_qubits):
-        ent.h(i)
+        ent.cx(i, i+1)
         ent.cx(i, i+H.num_qubits)
+
+    # ent.draw('mpl')
+    # plt.show()
+
 
     # apply expH to both halves; need to shift the qubit indices by the desired amount
     expH2 = QuantumCircuit(2*H.num_qubits)
@@ -289,14 +297,39 @@ def get_expV(n_majorana, mu =-12, steps=20):
     return expV
 
 ## ------ main function to implment the protocol ------- ##
+def get_SWAP(j, num_qubits, left=True):
+    '''Returns the SWAP gate between the j-th dirac fermion and the j+1-th dirac fermion
+
+    NOT IN USE
+    
+    '''
+    l = 2*j
+    # get majorana operator as qubit
+    qubit_op = majorana_to_qubit_op(l, num_qubits, left=left)
+    qubit_op2 = majorana_to_qubit_op(l+1, num_qubits, left=left)
+
+    # get dirac fermion operator
+    dirac_op = .5 *(qubit_op + 1j* qubit_op2)
+
+    # convert from palui op to quantum circuit
+    dirac_mat = Operator(dirac_op).data
+    return dirac_mat
+
+    # # get the SWAP gate
+    # block00 = dirac_op
+    
 def protocol_round(H, tfd, expV, tev_nt0, tev_pt0, t,steps=100):
     '''Implements a single round of the the wormhole protocol for the SYK model with n_majorana fermions at time t, interaction param mu, and inverse temperature beta.'''
     ## STEP 1: generate TFD and apply negative time evolution on L
     # make tfd
-    total_circuit = QuantumCircuit(2*H.num_qubits + 3)
+    total_circuit = QuantumCircuit(2*H.num_qubits + 2)
     ## STEP 2: swap in register Q of bell pair into tfd
     total_circuit.h(0)
     total_circuit.cx(0, 1)
+
+    # swap in the bell pair
+    total_circuit.swap(1, 2)
+
 
     # set the tfd within the larger full circuit with registers P, Q before it and T at the end
     for gate in tfd.data:
@@ -305,7 +338,7 @@ def protocol_round(H, tfd, expV, tev_nt0, tev_pt0, t,steps=100):
     # leaves the last register T as 0
         
     # plot the tfd
-    total_circuit.draw('mpl').savefig('results/tfd.pdf')
+    # total_circuit.draw('mpl').savefig('results/tfd.pdf')
 
 
     # apply backwards time evolution to L part of tfd
@@ -314,16 +347,15 @@ def protocol_round(H, tfd, expV, tev_nt0, tev_pt0, t,steps=100):
         total_circuit.append(gate[0], qubits)
 
     # plot the tfd with negative time evolution
-    total_circuit.draw('mpl').savefig('results/tfd_neg_time.pdf')
+    # total_circuit.draw('mpl').savefig('results/tfd_neg_time.pdf')
 
     
     # Apply SWAP gates between Q and left half of the TFD
-    for i in range(H.num_qubits):
-        total_circuit.swap(i, i + H.num_qubits)
-    # total_circuit.swap(1, 2)
-
+    # for i in range(H.num_qubits):
+    #     total_circuit.swap(i, i + H.num_qubits)
+    
     # plot the tfd with swapped in bell pair
-    total_circuit.draw('mpl').savefig('results/tfd_swap.pdf')  
+    # total_circuit.draw('mpl').savefig('results/tfd_swap.pdf')  
 
     ## STEP 3: apply forward time evolution to L part of tfd
     for gate in tev_pt0.data:
@@ -344,15 +376,15 @@ def protocol_round(H, tfd, expV, tev_nt0, tev_pt0, t,steps=100):
         total_circuit.append(gate[0], qubits)
 
     ## STEP 6: swap out r to T
-    for i in range(H.num_qubits):
-        total_circuit.swap(i + H.num_qubits, total_circuit.num_qubits -1)
-    # total_circuit.swap(7,total_circuit.num_qubits -1)
+    # for i in range(H.num_qubits):
+    #     total_circuit.swap(i + H.num_qubits, total_circuit.num_qubits -1)
+    # total_circuit.cx(total_circuit.num_qubits -2,total_circuit.num_qubits -1)
     
     # optimize
     tfd_final = transpile(total_circuit, optimization_level=1)
-    print(tfd_final)
+    # print(tfd_final)
     # save image
-    tfd_final.draw('mpl').savefig(f'results/tfd_final_{t}.pdf')
+    # tfd_final.draw('mpl').savefig(f'results/tfd_final_{t}.pdf')
     print('number of gates:', tfd_final.count_ops())
 
     ## STEP 7: compute the mutual info
@@ -388,7 +420,9 @@ def implement_protocol(n_majorana, tmin=0, tmax=10, overall_steps = 20, steps = 
     '''Computes the correlation K for n_majorana fermions at time t, interaction param mu, and inverse temperature beta'''
 
     # get the Hamiltonian
-    H = get_SYK(n_majorana) 
+    H_L = get_SYK(n_majorana, left=True) 
+    H_R = get_SYK(n_majorana, left=False)
+    H = H_L + H_R
     tfd = get_TFD(H, beta) 
     expV = get_expV(n_majorana, mu, steps) 
 
@@ -406,13 +440,21 @@ def implement_protocol(n_majorana, tmin=0, tmax=10, overall_steps = 20, steps = 
             I = protocol_round(H, tfd, expV, tev_nt0, tev_pt0,t, steps)
             I_ls.append(I)
 
+        # do it at 2.8
+        I = protocol_round(H, tfd, expV, tev_nt0, tev_pt0, t0, steps)
+        I_ls.append(I)
+
         # plot the mutual info
         plt.figure()
-        plt.scatter(np.arange(tmin, tmax+1, delta_t), I_ls)
+        t_ls = np.arange(tmin, tmax+1, delta_t)
+        t_ls = np.append(t_ls, t0)
+        plt.scatter(t_ls, I_ls)
         # draw vertical line at t0
         plt.axvline(x=t0, color='r', linestyle='--')
         plt.xlabel('Time')
         plt.ylabel('Mutual Information')
+        # scale y axis based on the max and min of the mutual infos
+        plt.ylim([min(I_ls)*0.999, max(I_ls)*1.001])
         plt.savefig('results/mutual_info.pdf')
         # plt.show()
 
@@ -443,6 +485,46 @@ def benchmark_SYK(num, n_majorana):
     print(f'Average fidelity: {avg_fidelity} ± {sem_fidelity}')
     print(f'Average gate speedup: {avg_gate_speedup} ± {sem_gate_speedup}')
 
+def benchmark_trotter_suzuki(num, n_majorana, tf=1, steps=20):
+    for _ in range(num):
+        H_L = get_SYK(n_majorana,  left=True)
+        H_R = get_SYK(n_majorana, left=False)
+        H = H_L + H_R
+
+        # get SYK from trotter
+        H_opt = time_evolve(H, tf=tf, steps=steps, benchmark=True)
+        H_act = expm(-1j * H.to_matrix() * tf)
+
+        # fidelity
+        fidelity = np.linalg.norm(H_opt.data - H_act)
+        print('Fidelity:', fidelity)
+
+
+
+def run_multiple_protocol(n_majorana, num, tmin=0, tmax=10, overall_steps = 20, steps = 50, mu=-12, beta=4, t0=2.8):
+    '''Runs the protocol num times and logs the average and sem mutual info.'''
+    mutual_infos = []
+    for _ in range(num):
+        mutual_info = implement_protocol(n_majorana, tmin, tmax, overall_steps, steps, mu, beta, t0)
+        mutual_infos.append(mutual_info)
+
+    delta_t = (tmax - tmin) / overall_steps
+     # overall plot
+    plt.figure()
+    for I_ls in mutual_infos:
+        plt.scatter(np.arange(tmin, tmax+1, delta_t), I_ls)
+    # draw vertical line at t0
+    plt.axvline(x=t0, color='r', linestyle='--')
+    plt.xlabel('Time')
+    plt.ylabel('Mutual Information')
+    # set y size based on the max and min of the mutual infos
+    plt.ylim([min([min(I_ls) for I_ls in mutual_infos])*.999, max([max(I_ls) for I_ls in mutual_infos])*1.001])
+    plt.savefig('results/mutual_info_multiple.pdf')
+
 if __name__ == "__main__":
-    implement_protocol(10, run_once=True, t_once=2.8)
-    # implement_protocol(10, overall_steps= 5)
+    # implement_protocol(10, run_once=True, t_once=2.8)
+    implement_protocol(10, overall_steps= 5)
+    # print_matrix(get_SWAP(0, 5, left=True))
+    # run_multiple_protocol(n_majorana=10, num=10, overall_steps=20)
+
+    # benchmark_trotter_suzuki(1, 10, tf=1, steps=20)
