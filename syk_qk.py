@@ -512,7 +512,9 @@ def run_multiple_protocol(n_majorana, num, tmin=0, tmax=10, overall_steps = 20, 
      # overall plot
     plt.figure()
     for I_ls in mutual_infos:
-        plt.scatter(np.arange(tmin, tmax+1, delta_t), I_ls)
+        t_ls = np.arange(tmin, tmax+1, delta_t)
+        t_ls = np.append(t_ls, t0)
+        plt.scatter(t_ls, I_ls)
     # draw vertical line at t0
     plt.axvline(x=t0, color='r', linestyle='--')
     plt.xlabel('Time')
@@ -523,8 +525,8 @@ def run_multiple_protocol(n_majorana, num, tmin=0, tmax=10, overall_steps = 20, 
 
 if __name__ == "__main__":
     # implement_protocol(10, run_once=True, t_once=2.8)
-    implement_protocol(10, overall_steps= 5)
+    # implement_protocol(10, overall_steps= 5)
     # print_matrix(get_SWAP(0, 5, left=True))
-    # run_multiple_protocol(n_majorana=10, num=10, overall_steps=20)
+    run_multiple_protocol(n_majorana=10, num=10, overall_steps=20)
 
     # benchmark_trotter_suzuki(1, 10, tf=1, steps=20)
