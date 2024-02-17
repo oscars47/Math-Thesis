@@ -3,7 +3,36 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
-## 2/12/25
+## 2/16/24
+* found SuzukiTrotter method from Qiskit. puts in CNOT -- which makes sense why the final MI could change under these circumstances.
+** biggest concern** what choice of VQE ansatz? what configuration of time evolution? how to sparsify since the CNOTs ruin the party?
+** what i am going to do ** run benchmark for variety of configurations and see the impact on mutual info
+* things to consider: 
+** ansatz for TFD: need rigorous comparison ground state energy of ansatz to target
+** what time evolution to use? [using PauliEvolutionGate, default synthesis is the Lie-Trotter product formula with a single repetition.] need more efficient: counting 333 cx, 171 u3 gates with 
+** idea: once we have an understanding of what the mutual info should look like in the full mega gate setup, create a test circuit similar to the original one i was playing around with and try to match the mutual info dynamics **
+--> motivation is there seems to be a lot of redudancy with the CNOT gates because of the way time evolution is implemented. would test if it also can learn the other dynamics we want to measure to prove teleportation
+
+code: 
+* wrote benchmark_vqe
+* added ans param to full_protocol(). 
+* for conveinience added get_H_LR() to prepare H_L, H_R, H_LR in the combined N_m qubit space.
+
+## 2/15/24
+* fixed majorana_to_qubit() 
+* working on VQE: number of CZ = 2*N_m - 1. but how to perform VQE since the number of qubits required for H is only N_m/2. but: what about since we know H_TFD = H_L + H_R + V really means (H_L \otimes I_{N_q}) + (I_{N_q} \otimes H_R) + V. same implicit tensor product for V on L and R: i.e., V = 1/qN \sum_j (\psi_{j_L} \otimes I_{N_q/2}) (I_{N_q/2}  \otimes \psi_{j_R}).
+** got VQE working! seems to have min eigenvalue of around -1.2. resulting parameters are the same even after re-running
+* added trotter-suzuki and rest of protocol from previous code
+* result is still 0 mutual info....
+* changed ansatz to entangle neighbors. have non-0 MI, but doesn't as the later time evolution changes -- why would it? need to put the rotations *before* the conditional -- how is their 
+* tried test idea of all CNOT chained together
+
+
+## 2/13/24
+* need to use a different jordan wigner transformation for the majorana, as well as vqe for SYK: https://learning.quantum.ibm.com/tutorial/variational-quantum-eigensolver.
+* started file syk_qk_redo.py
+
+## 2/12/24
 * still nothing on the swap gates. tried changing them to cx but no luck.
 * need to take H = Hl + Hr: doesn't fix anything....
 * wrote AZ for code. need to understand what the circuit should actually look like and why the teleportation doesn't work
