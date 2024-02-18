@@ -3,6 +3,20 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+## 2/18/24
+* ran reconstruct_total() on the analytic large N MI data on 3 qubit circuit, saving both the loss and angles. result for 15 different points is:  
+    Avg loss: 1.0282881953334784e-09
+    SEM dev loss: 3.3446982547455856e-10
+* will run reconstruct_total() but on actual IBM eagle processor so we can get those results using the saved angle configs
+
+## 2/17/24
+* ran benchmark of vqe with 20 iterations per ansatz
+* generating mutual info over time for mu in [-12, -6, 0, 6, 12] and each ansatz 5 times (added parallelization) --> will combine these into one plot, which will be main result for this implementation of the protocol. actually decided not to combine all of them bc the scaling is so off...could for each config (ansatz, mu) will calculate avg, sem per datapoint and plot each of these. CLEARER ARGUMENT: should be no mutual info transmitted at mu = 0. only ans 0 does this. but then the resulting shapes for other mu for ans 0 don't agree (not consistent), and the ground state energy is off 0.1491039549729666 +- 0.09610106055094844, which is abs val diff relative to abs val of true
+* extracted MI data from jafferis et al 2022 paper
+* added parametrized model to replicate the MI dynamics: will train on the extracted data using trabbit
+* fundamental philosophical question: if i can recreate the MI data to arbitrary precision, what does this mean from a simulation perspective?
+
+
 ## 2/16/24
 * found SuzukiTrotter method from Qiskit. puts in CNOT -- which makes sense why the final MI could change under these circumstances.
 ** biggest concern** what choice of VQE ansatz? what configuration of time evolution? how to sparsify since the CNOTs ruin the party?
@@ -14,7 +28,7 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 --> motivation is there seems to be a lot of redudancy with the CNOT gates because of the way time evolution is implemented. would test if it also can learn the other dynamics we want to measure to prove teleportation
 
 code: 
-* wrote benchmark_vqe
+* wrote benchmark_vqe  --  + added parallelization of inner loop checking the different ansatzes
 * added ans param to full_protocol(). 
 * for conveinience added get_H_LR() to prepare H_L, H_R, H_LR in the combined N_m qubit space.
 
