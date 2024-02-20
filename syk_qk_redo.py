@@ -2,6 +2,7 @@
 
 import numpy as np
 from qiskit import transpile, QuantumCircuit, Aer, execute
+from qiskit_ibm_provider import IBMProvider
 from qiskit.quantum_info import Operator, DensityMatrix, partial_trace, entropy
 from qiskit.utils import QuantumInstance, algorithm_globals
 from qiskit.circuit.library import PauliEvolutionGate, EfficientSU2
@@ -10,12 +11,16 @@ from qiskit.algorithms.optimizers import SPSA
 from qiskit.algorithms import NumPyMinimumEigensolver
 from qiskit.circuit import Parameter
 from qiskit.opflow import I, X, Y, Z, PauliSumOp, PauliOp
+from qiskit.quantum_info import partial_trace, DensityMatrix, entropy
+from qiskit_experiments.framework import ParallelExperiment
+from qiskit_experiments.library import StateTomography
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import matplotlib.pyplot as plt
 import os, time, json
 from math import factorial
 from tqdm import trange
 from oscars_toolbox.trabbit import trabbit
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def time_evolve(H, tf=1):
     '''Time evolves the Hamiltonian H from t0 to tf in steps.'''
@@ -266,7 +271,7 @@ def run_VQE(H_LR, V, beta=4, ans=0, display_circs=False, benchmark=False):
     # Display the circuit
     if display_circs:
         ansatz.draw('mpl')
-        plt.savefig('results_new/vqe_circuit.pdf')
+        plt.savefig(f'results_new/vqe_circuit_{ans}.pdf')
 
     # now perform VQE
     # Set up the optimizer
@@ -314,17 +319,19 @@ def run_VQE(H_LR, V, beta=4, ans=0, display_circs=False, benchmark=False):
         # compare as abs fractional error
         return np.abs(ground_state_energy - min_eig) / np.abs(ground_state_energy)
 
-def compute_mi(circuit, save_param=None):
+def compute_mi(circuit, display_circs=None, save_param=None):
     ''' computes mutual info between first and last qubit'''
     # I = S(R) + S(T) - S(TR)
     n_qubits = circuit.num_qubits
 
     # first transpile
     tfd_final = transpile(circuit, optimization_level=1, basis_gates=['cx', 'u3'])
-    if save_param is not None:
-        tfd_final.draw('mpl').savefig(f'results_new/tfd_final_{save_param}.pdf')
-        print('number of gates:', tfd_final.count_ops())
-
+    if display_circs:
+        print('Number of gates:', tfd_final.count_ops())
+        if save_param is not None:
+            tfd_final.draw('mpl').savefig(f'results_new/total_circuit_{save_param}.pdf')
+        else:
+            tfd_final.draw('mpl').savefig('results_new/total_circuit.pdf')
     # get the density matrix
     # Run the circuit on a statevector simulator backend
     backend = Aer.get_backend('statevector_simulator')
@@ -346,8 +353,34 @@ def compute_mi(circuit, save_param=None):
     return entropy(rho_P) + entropy(rho_T) - entropy(rho_PT)
 
 
+def compute_mi_actual(circuit, backend, shots=10000):
+    ''' Computes mutual info between first and last qubit using Qiskit Experiments for state tomography.'''
+
+    # Setup state tomography on the first and last qubits
+    tomo_experiment = StateTomography(circuit, measurement_indices=[0, circuit.num_qubits - 1])
+
+    # Run the state tomography experiment
+    experiment_data = tomo_experiment.run(backend, shots=shots).block_for_results()
+
+    # Access analysis results directly
+    analysis_results = experiment_data.analysis_results()
+
+    # Process analysis results as needed
+    tomo_result = analysis_results[0].value
+
+    # Compute the mutual information
+    # Get the reduced density matrices
+    rho_P = partial_trace(tomo_result, [0])
+    rho_T = partial_trace(tomo_result, [1])
+    rho_PT = tomo_result  # The joint state of the first and last qubits
+
+    # Compute the mutual info
+    mutual_info = entropy(rho_P) + entropy(rho_T) - entropy(rho_PT)
+    return mutual_info
+
+
 ## ---- main ---- ##
-def protocol_round(H_R, tfd, expV, tev_nt0, tev_pt0, t, save_circs=False):
+def protocol_round(H_R, tfd, expV, tev_nt0, tev_pt0, t, display_circs=False, save_param=None):
     '''Implements a single round of the the wormhole protocol for the SYK model with n_majorana fermions at time t, interaction param mu, and inverse temperature beta.'''
     ## STEP 1: generate TFD and apply negative time evolution on L
     # make tfd
@@ -388,16 +421,11 @@ def protocol_round(H_R, tfd, expV, tev_nt0, tev_pt0, t, save_circs=False):
 
     ## STEP 6: SWAP out qubit (skip, since we'll just measure on the last qubit)
 
-    if save_circs:
-        save_param = str(time.time()) 
-    else:
-        save_param = None
-
-    I = compute_mi(total_circuit, save_param=save_param)
+    I = compute_mi(total_circuit, display_circs=display_circs, save_param=save_param)
     print(f'Mutual info at t = {t}: {I}')
     return I
 
-def full_protocol(N_m, tf = 10, ans = 0, t_steps = 10, t0= 2.8, mu=12, subdir=None):
+def full_protocol(N_m, tf = 10, ans = 0, t_steps = 10, t0= 2.8, mu=12, subdir=None, display_circs=False):
     '''Runs the full wormhole protocol from t = 0 to t = tf in t_steps for the SYK model with N_m fermions. ans specfiies the ansatz to use for VQE. t0 is the time for the initial negative/positive time evolution.
     
     Params:
@@ -408,6 +436,7 @@ def full_protocol(N_m, tf = 10, ans = 0, t_steps = 10, t0= 2.8, mu=12, subdir=No
         t0 (float): time for the initial negative/positive time evolution
         mu (float): interaction parameter
         subdir (str): name of the subdirectory (of results_new) to save the results in 
+        display_circs (bool): whether to display the circuits
     
     '''
 
@@ -421,16 +450,22 @@ def full_protocol(N_m, tf = 10, ans = 0, t_steps = 10, t0= 2.8, mu=12, subdir=No
     expV = time_evolve(V, tf=1)
 
     # --- run VQE to get the TFD state for given choice of ansatz --- #
-    TFD = run_VQE(H_LR,  V, ans = ans, display_circs=False)
+    TFD = run_VQE(H_LR,  V, ans = ans, display_circs=display_circs, benchmark=False)
 
     # --- negative and positive time ev  --- #
     tev_nt0 = time_evolve(H_L, tf=-t0)
     tev_pt0 = time_evolve(H_L, tf=t0)
 
+    if display_circs:
+        tev_nt0.draw('mpl')
+        plt.savefig('results_new/tev_nt0.pdf')
+        tev_pt0.draw('mpl')
+        plt.savefig('results_new/tev_pt0.pdf')
+
     # --- run the protocol --- #
     mutual_infos = []
     for t in np.linspace(0, tf, t_steps):
-        mutual_infos.append(protocol_round(H_R, TFD, expV, tev_nt0, tev_pt0, t))
+        mutual_infos.append(protocol_round(H_R, TFD, expV, tev_nt0, tev_pt0, t, display_circs=display_circs))
 
     # save the mutual infos
     if subdir is  None:
@@ -456,12 +491,12 @@ def full_protocol(N_m, tf = 10, ans = 0, t_steps = 10, t0= 2.8, mu=12, subdir=No
     
     return mutual_infos
 
-def run_vqe_for_ansatz(ans, H_LR, V):
+def run_vqe_for_ansatz(ans, H_LR, V, display_circs=False):
         '''helper function for parallelization'''
-        diff = run_VQE(H_LR, V, ans=ans, benchmark=True)  # Assuming run_VQE is defined elsewhere
+        diff = run_VQE(H_LR, V, ans=ans, benchmark=True, display_circs=display_circs)  # Assuming run_VQE is defined elsewhere
         return ans, diff
 
-def benchmark_vqe(N_m, num_iter, max_ans=3):
+def benchmark_vqe(N_m, num_iter, max_ans=3, display_circs=False):
     '''for each ansatz 0 - 2, calculate difference between learned and exact min eigenvalue for num_iter iterations'''
     if not os.path.exists('results_new'):
         os.makedirs('results_new')
@@ -480,7 +515,7 @@ def benchmark_vqe(N_m, num_iter, max_ans=3):
         # Execute the tasks in parallel
         with ProcessPoolExecutor() as executor:
             # Submit all VQE runs to the executor
-            futures = [executor.submit(run_vqe_for_ansatz, ans, H_LR, V) for ans in range(max_ans+1)]
+            futures = [executor.submit(run_vqe_for_ansatz, ans, H_LR, V, display_circs) for ans in range(max_ans+1)]
             
             # Process the results as they complete
             for future in as_completed(futures):
@@ -539,12 +574,8 @@ def benchmark_mi(N_m, num_reps=5):
                 print(f"Task generated an exception: {e}")
 
 ## ---- reconstructing the mutual info with preset circuit ---- ##
-def learn_point(mi_target, config):
-    '''learns an ansatz specified by config to reproduce a given mutual information point
-
-    config is actually the number of qubits, default architecture is the same: apply U3 gates to each qubit and then entangle all qubits in a chain, measure MI between initial and final qubit 
-
-    '''
+def get_ansatz(config, simulate=True):
+    '''generates the parametrized ansatz for the given number of qubits. Default is U3 gates on each qubit and then entangling all qubits in a chain.'''
     ansatz = QuantumCircuit(config)
     # Define parameters for the U3 gates
     theta = [Parameter(f'θ_{i}') for i in range(config-1)]
@@ -561,6 +592,22 @@ def learn_point(mi_target, config):
     # Apply CNOT to connect each qubit i to i+1 
     for i in range(config-1):
         ansatz.cx(i, i+1)
+
+    if simulate:
+        ansatz = transpile(ansatz, optimization_level=1, basis_gates=['cx', 'u3'])
+    else: # ECR, ID, RZ, SX, X
+        ansatz = transpile(ansatz, optimization_level=1, basis_gates=['ecr', 'id', 'rz', 'sx', 'x'],)
+
+    return ansatz
+
+def learn_point(mi_target, config):
+    '''learns an ansatz specified by config to reproduce a given mutual information point
+
+    config is actually the number of qubits, default architecture is the same: apply U3 gates to each qubit and then entangle all qubits in a chain, measure MI between initial and final qubit 
+
+    '''
+    # get the ansatz
+    ansatz = get_ansatz(config)
 
     # define objective function
     def objective_function(ansatz, params):
@@ -605,12 +652,152 @@ def reconstruct_total(mi_path='mi_data/mi_2.csv', config=3):
     print(f'Avg loss: {np.mean(loss_ls)}')
     print(f'SEM dev loss: {np.std(loss_ls) / np.sqrt(len(loss_ls) - 1)}')
     
+def run_reconstruction(angles_path='results_new/angles_3_1708293092.npy', t_path = 'mi_data/mi_2.csv', num_times = 5, config=3, simulate=True):
+    '''runs the reconstructed circuit with the learned parameters, angles, and either simulates or runs on hardware'''
+
+    if simulate:
+        shots=10000
+    else:
+        shots=2000
+
+    # load the angles
+    angles = np.load(angles_path)
+    I_ls = []
+    I_sem_ls = []
+    if simulate:
+        # backend = Aer.get_backend('statevector_simulator')
+        provider = IBMProvider()
+        backend = provider.get_backend('ibmq_qasm_simulator')
+    else:
+        provider = IBMProvider()
+        backend = provider.get_backend('ibm_kyoto')
+
+    def execute_task(angle, config, simulate, backend):
+        '''objective function for the optimizer'''
+        ansatz = get_ansatz(config, simulate=simulate)
+        ansatz = ansatz.assign_parameters(angle)
+        return compute_mi_actual(ansatz, backend, shots=shots)
+
+    # if simulate:
+    for angle in angles:
+        I_angles = []
+        for i in range(num_times):
+            # get the ansatz
+            ansatz = get_ansatz(config, simulate=simulate)
+            print(f'angle: {angle}, time: {i}')
+            # print('Number of gates:', ansatz.count_ops())
+            # print('Number of qubits:', ansatz.num_qubits)
+            # apply the parameters to the ansatz
+            ansatz = ansatz.assign_parameters(angle)
+            # simulate or run on hardware
+            I = compute_mi_actual(ansatz, backend, shots=shots)
+            I_angles.append(I)
+
+        I_ls.append(np.mean(I_angles))
+        I_sem_ls.append(np.std(I_angles) / np.sqrt(num_times - 1))
+
+    # else:
+    #    # Function to manage the concurrent execution of tasks, limiting to 3 at a time
+    #     def manage_tasks():
+    #         results = []
+    #         futures = []
+
+    #         with ThreadPoolExecutor(max_workers=3) as executor:
+    #             # Submit the first batch of tasks
+    #             for angle in angles:
+    #                 for _ in range(num_times):
+    #                     if len(futures) < 3:
+    #                         future = executor.submit(execute_task, angle, config, simulate, backend)
+    #                         futures.append((future, angle))
+    #                     else:
+    #                         break
+
+    #             while futures:
+    #                 # Wait for the first future to complete
+    #                 done, _ = as_completed(futures, timeout=None, return_when='FIRST_COMPLETED').__next__()
+
+    #                 # Process completed future
+    #                 for future, angle in futures:
+    #                     if future == done:
+    #                         try:
+    #                             result = future.result()
+    #                             results.append((angle, result))
+    #                             futures.remove((future, angle))  # Remove this task from the list
+    #                             break
+    #                         except Exception as e:
+    #                             print(f"Task for angle {angle} resulted in an error: {e}")
+
+    #                 # Submit a new task if there are angles left to process
+    #                 for angle in angles:
+    #                     if len(futures) < 3:
+    #                         new_future = executor.submit(execute_task, angle, config, simulate, backend)
+    #                         futures.append((new_future, angle))
+    #                         break
+
+    #         return results
+
+    #     results = manage_tasks()
+
+    #     # Process and save the results
+    #     # Assuming you want to compute mean and SEM for each angle
+    #     angles_processed = set(angle for angle, _ in results)
+    #     I_ls = []
+    #     I_sem_ls = []
+
+    #     for angle in angles_processed:
+    #         angle_results = [result for angle_res, result in results if angle_res == angle]
+    #         mean_I = np.mean(angle_results)
+    #         sem_I = np.std(angle_results, ddof=1) / np.sqrt(len(angle_results))
+    #         I_ls.append(mean_I)
+    #         I_sem_ls.append(sem_I)
+
+    # save the results
+    timestamp = int(time.time())
+    np.save(f'results_new/I_{config}_{timestamp}_{simulate}.npy', I_ls)
+    np.save(f'results_new/I_sem_{config}_{timestamp}_{simulate}.npy', I_sem_ls)
+
+    # plot
+    # compare to the actual mutual info
+    t_I_ls = np.loadtxt(t_path, delimiter=',')
+    t_ls = t_I_ls[:, 0]
+    I_actual_ls = t_I_ls[:, 1]
+    plt.figure(figsize=(10, 10))
+    plt.errorbar(t_ls, I_ls, yerr=I_sem_ls, fmt='o', color='red', label='Reconstructed')
+    plt.scatter(t_ls, I_actual_ls, label='Actual', color='blue')
+    plt.xlabel('Time')
+    plt.ylabel('Mutual Information')
+    plt.legend()
+    plt.title(f'Mutual Information for Reconstructed Circuit, config = {config}')
+    plt.savefig(f'results_new/I_{config}_{timestamp}_{simulate}.pdf')
+    plt.show()
+
+def plot_angles(angles_path='results_new/angles_3_1708293092.npy'):
+    '''plots the angles for the reconstructed circuit'''
+    angles = np.load(angles_path)
+    print(angles)
+    plt.figure(figsize=(5, 5))
+    # plot each column of angles as a line
+    # get colorwheel by number of columns
+    colors = plt.cm.viridis(np.linspace(0, 1, angles.shape[1]))
+    for i in range(angles.shape[1]):
+        plt.plot(angles[:, i], label=f'Angle {i+1}', color=colors[i], marker='o', alpha=0.7)
+    plt.xlabel('Instance')
+    plt.ylabel('Angle')
+    # move the legend outside the plot
+    plt.legend(bbox_to_anchor=(1, 1), loc='upper left')
+    plt.title('Angles for Reconstructed Circuit')
+    plt.savefig('results_new/angles.pdf')
+    plt.show()
+
 
 if __name__ == '__main__':
     N_m=10
-    # benchmark_vqe(N_m, num_iter=20)
+    # benchmark_vqe(N_m, num_iter=1, display_circs=True)
     # benchmark_mi(N_m, num_reps=5)
-    reconstruct_total()
-   
+    # reconstruct_total()
+    # run_reconstruction(simulate=False)
+    # plot_angles()
+    full_protocol(N_m, tf = 2, t_steps=1, display_circs=True)
+  
 
     
