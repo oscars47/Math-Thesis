@@ -21,10 +21,13 @@ from math import factorial
 from tqdm import trange
 from oscars_toolbox.trabbit import trabbit
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
+from math import comb
+from scipy.optimize import approx_fprime
 
 def time_evolve(H, tf=1):
     '''Time evolves the Hamiltonian H from t0 to tf in steps.'''
-    print('Time evolving...')
+    # print('Time evolving...')
     # get the circuit 
     # first convert paulisumop to pauli evolution gate
     H_evo = PauliEvolutionGate(H, time=tf)
@@ -44,16 +47,16 @@ def time_evolve(H, tf=1):
     # log the total number of gates in the qc
     num_gates_initial_dict = H_circ.count_ops()
     num_gates_initial = sum(num_gates_initial_dict.values())
-    print('Number of gates in initial circuit:', num_gates_initial)
+    # print('Number of gates in initial circuit:', num_gates_initial)
 
     # run transpiler
     H_opt_circ = transpile(H_circ, optimization_level=1, basis_gates=['cx', 'u3'])
-    print('Transpiled...')
+    # print('Transpiled...')
 
     # log the number of gates in the optimized qc
     num_gates_opt_dict = H_opt_circ.count_ops()
     num_gates_opt = sum(num_gates_opt_dict.values())
-    print('Number of gates in optimized circuit:', num_gates_opt)
+    # print('Number of gates in optimized circuit:', num_gates_opt)
 
     return H_opt_circ # just return the optimized circuit
 
@@ -92,6 +95,46 @@ def majorana_to_qubit_op(j, n_qubits, left=True):
 
     return full_operator
 
+def get_SYK_from_params(n_majorana, params,left=True):
+    '''allows defining parametrized SYK Hamiltonian as a PauliSumOp object in Qiskit.
+
+    '''
+
+    # reshape into 4D tensor
+    params = params.reshape(n_majorana, n_majorana, n_majorana, n_majorana)
+
+    n_qubits = n_majorana // 2
+
+    # initialize Hamiltonian as all 0s
+    H = PauliSumOp.from_list([("I" * n_qubits, 0.0)]) 
+
+
+    for i in range(n_majorana):
+        for j in range(n_majorana):
+            for k in range(n_majorana):
+                for l in range(n_majorana):
+                    if params[i, j, k, l] != 0:
+                        term = majorana_to_qubit_op(i, n_qubits, left=left) @ majorana_to_qubit_op(j, n_qubits,left=left) @ majorana_to_qubit_op(k, n_qubits, left=left) @ majorana_to_qubit_op(l,  n_qubits, left=left)
+                        H += params[i, j, k, l] * term
+
+    return H
+
+def get_random_SYK_params(n_majorana, J=2):
+    '''returns random SYK params for a given number of Majorana fermions, in form of n_majorana x n_majorana x n_majorana x n_majorana tensor'''
+
+    var = factorial(3) * J**2 / (n_majorana**3)
+    Jp = np.random.normal(0, np.sqrt(var), (n_majorana, n_majorana, n_majorana, n_majorana))
+
+    # Ensure Jijkl is antisymmetric
+    for i in range(n_majorana):
+        for j in range(n_majorana):
+            for k in range(n_majorana):
+                for l in range(n_majorana):
+                    if i >= j or j >= k or k >= l:
+                        Jp[i, j, k, l] = 0 
+
+    return Jp
+
 def get_SYK(n_majorana, J=2, left=True):
     '''Returns the SYK Hamiltonian as a PauliSumOp object in Qiskit.
 
@@ -102,35 +145,10 @@ def get_SYK(n_majorana, J=2, left=True):
         save_name (str): name of the file to save as
     
     '''
+    # get coeffficients
+    Jp = get_random_SYK_params(n_majorana, J=J)
 
-    print(f'Generating SYK Hamiltonian for N_m = {n_majorana}...')
-
-    # Parameters
-    n_qubits = n_majorana // 2
-
-    var = factorial(3) * J**2 / (n_majorana**3)
-    J = np.random.normal(0, np.sqrt(var), (n_majorana, n_majorana, n_majorana, n_majorana))
-
-    # Ensure Jijkl is antisymmetric
-    for i in range(n_majorana):
-        for j in range(n_majorana):
-            for k in range(n_majorana):
-                for l in range(n_majorana):
-                    if i >= j or j >= k or k >= l:
-                        J[i, j, k, l] = 0                     
-
-    # initialize Hamiltonian as all 0s
-    H = PauliSumOp.from_list([("I" * n_qubits, 0.0)]) 
-
-    for i in range(n_majorana):
-        for j in range(n_majorana):
-            for k in range(n_majorana):
-                for l in range(n_majorana):
-                    if J[i, j, k, l] != 0:
-                        term = majorana_to_qubit_op(i, n_qubits, left=left) @ majorana_to_qubit_op(j, n_qubits,left=left) @ majorana_to_qubit_op(k, n_qubits, left=left) @ majorana_to_qubit_op(l,  n_qubits, left=left)
-                        H += J[i, j, k, l] * term
-
-    return H
+    return get_SYK_from_params(n_majorana, Jp, left=left)
 
 def get_H_LR(N_m, J=2):
     '''prepare syk hamiltonians for L and R systems'''
@@ -156,7 +174,7 @@ def get_H_LR(N_m, J=2):
 
 def get_V(n_majorana):
     '''Returns the V operator for the SYK model as a PauliSumOp object in Qiskit.'''
-    print(f'Generating V operator for N = {n_majorana}...')
+    # print(f'Generating V operator for N = {n_majorana}...')
     V = PauliSumOp.from_list([("I" * n_majorana, 0.0)])
     # go through all majorana operators
     for i in range(n_majorana):
@@ -184,7 +202,9 @@ def run_VQE(H_LR, V, beta=4, ans=0, display_circs=False, benchmark=False):
         ans (int): which ansatz to use:
             0: EfficientSU2
             1: U(3) on all + cnot chain
-            2: U(3) on all + cnot ladder + cnot chain
+            2: U(3) on all + cnot ladder + cnot chain (only on L)
+            3: U(3) on all + every qubit connected to the next
+            4: U(3) on all + every qubit connected to the next + every qubit connected to the corresponding one at (i + N) % 2N
         display_circs (bool): whether to display the circuits
         benchmark (bool): whether to compare the min eigenvalue to the exact value with NumPyMinimumEigensolver
     
@@ -266,7 +286,25 @@ def run_VQE(H_LR, V, beta=4, ans=0, display_circs=False, benchmark=False):
         # Apply parameterized U(3) gate on each qubit
         for i in range(2*N):
             ansatz.u(theta[i+4*N], phi[i+4*N], lambda_[i+4*N], i)
-        
+
+    elif ans == 4:
+        theta = [Parameter(f'θ_{i}') for i in range(4*N)]
+        phi = [Parameter(f'φ_{i}') for i in range(4*N)]
+        lambda_ = [Parameter(f'λ_{i}') for i in range(4*N)]
+
+        ansatz = QuantumCircuit(2*N)
+        # Apply parameterized U(3) gate on each qubit
+        for i in range(2*N):
+            ansatz.u(theta[i], phi[i], lambda_[i], i)
+
+        # apply CNOTs
+        for i in range(2*N):
+            ansatz.cx(i, (i+1) % (2*N))
+            ansatz.cx(i, (i+N) % (2*N))
+
+        # Apply parameterized U(3) gate on each qubit
+        for i in range(2*N):
+            ansatz.u(theta[i+2*N], phi[i+2*N], lambda_[i+2*N], i)
 
     # Display the circuit
     if display_circs:
@@ -297,9 +335,9 @@ def run_VQE(H_LR, V, beta=4, ans=0, display_circs=False, benchmark=False):
         plt.title(f'Optimal VQE Circuit, E = {result.eigenvalue.real}')
         timestamp = int(time.time())
         plt.savefig(f'results_new/optimal_circuit_{timestamp}.pdf')
-
-    if not benchmark:
+        
         print(f"Minimum eigenvalue: {result.eigenvalue.real}")
+    if not benchmark:
         return optimal_circuit
     else:
         min_eig = result.eigenvalue.real
@@ -352,7 +390,6 @@ def compute_mi(circuit, display_circs=None, save_param=None):
     # compute the mutual info
     return entropy(rho_P) + entropy(rho_T) - entropy(rho_PT)
 
-
 def compute_mi_actual(circuit, backend, shots=10000):
     ''' Computes mutual info between first and last qubit using Qiskit Experiments for state tomography.'''
 
@@ -377,7 +414,6 @@ def compute_mi_actual(circuit, backend, shots=10000):
     # Compute the mutual info
     mutual_info = entropy(rho_P) + entropy(rho_T) - entropy(rho_PT)
     return mutual_info
-
 
 ## ---- main ---- ##
 def protocol_round(H_R, tfd, expV, tev_nt0, tev_pt0, t, display_circs=False, save_param=None):
@@ -422,10 +458,12 @@ def protocol_round(H_R, tfd, expV, tev_nt0, tev_pt0, t, display_circs=False, sav
     ## STEP 6: SWAP out qubit (skip, since we'll just measure on the last qubit)
 
     I = compute_mi(total_circuit, display_circs=display_circs, save_param=save_param)
-    print(f'Mutual info at t = {t}: {I}')
+    if display_circs:
+        print('Mutual info:', I)
+    # print(f'Mutual info at t = {t}: {I}')
     return I
 
-def full_protocol(N_m, tf = 10, ans = 0, t_steps = 10, t0= 2.8, mu=12, subdir=None, display_circs=False):
+def full_protocol(N_m, tf = 10, ans = 0, t_steps = 10, t0= 2.8, mu=-12, subdir=None, display_circs=False, plot_result=False):
     '''Runs the full wormhole protocol from t = 0 to t = tf in t_steps for the SYK model with N_m fermions. ans specfiies the ansatz to use for VQE. t0 is the time for the initial negative/positive time evolution.
     
     Params:
@@ -437,6 +475,7 @@ def full_protocol(N_m, tf = 10, ans = 0, t_steps = 10, t0= 2.8, mu=12, subdir=No
         mu (float): interaction parameter
         subdir (str): name of the subdirectory (of results_new) to save the results in 
         display_circs (bool): whether to display the circuits
+        plot_result (bool): whether to plot the mutual info at the end
     
     '''
 
@@ -482,21 +521,89 @@ def full_protocol(N_m, tf = 10, ans = 0, t_steps = 10, t0= 2.8, mu=12, subdir=No
     np.save(os.path.join(save_dir, f'mutual_infos_{N_m}_{ans}_{mu}_{timestamp}.npy'), mutual_infos)
 
     # make the plot
-    plt.figure(figsize=(10, 5))
-    plt.plot(np.linspace(0, tf, t_steps), mutual_infos)
-    plt.xlabel('Time')
-    plt.ylabel('Mutual Information')
-    plt.title(f'Mutual Information for $N_m = {N_m}$, ans = {ans}, $\mu = {mu}$')
-    plt.savefig(os.path.join(save_dir, f'mutual_info_{N_m}_{ans}__{mu}_{timestamp}.pdf'))
-    
+    if plot_result:
+        plt.figure(figsize=(10, 5))
+        plt.plot(np.linspace(0, tf, t_steps), mutual_infos)
+        plt.xlabel('Time')
+        plt.ylabel('Mutual Information')
+        plt.title(f'Mutual Information for $N_m = {N_m}$, ans = {ans}, $\mu = {mu}$')
+        plt.savefig(os.path.join(save_dir, f'mutual_info_{N_m}_{ans}__{mu}_{timestamp}.pdf'))
+        
     return mutual_infos
 
+def repeat_full_protocol(N_m, num_reps=5, ans=0, tf=10, t_steps=10, mu=-12, t0=2.8, subdir=None, display_circs=False):
+    '''Runs the full wormhole protocol from t = 0 to t = tf in t_steps for the SYK model with N_m fermions. ans specfiies the ansatz to use for VQE. t0 is the time for the initial negative/positive time evolution.
+    
+    Params:
+        N_m (int): number of Majorana fermions
+        tf (float): final time
+        ans (int): which ansatz to use for VQE
+        t_steps (int): number of steps to divide the time interval into
+        t0 (float): time for the initial negative/positive time evolution
+        mu (float): interaction parameter
+        subdir (str): name of the subdirectory (of results_new) to save the results in 
+        display_circs (bool): whether to display the circuits
+    
+    '''
+
+    # --- prepare the Hamiltonians --- #
+    H_LR, H_L, H_R = get_H_LR(N_m)
+
+    for _ in trange(num_reps):
+   
+        # --- prepare the V operator --- #
+        V = get_V(N_m)
+        # multiply by mu
+        V = mu * V
+        expV = time_evolve(V, tf=1)
+
+        # --- run VQE to get the TFD state for given choice of ansatz --- #
+        TFD = run_VQE(H_LR,  V, ans = ans, display_circs=display_circs, benchmark=False)
+
+        # --- negative and positive time ev  --- #
+        tev_nt0 = time_evolve(H_L, tf=-t0)
+        tev_pt0 = time_evolve(H_L, tf=t0)
+
+        if display_circs:
+            tev_nt0.draw('mpl')
+            plt.savefig('results_new/tev_nt0.pdf')
+            tev_pt0.draw('mpl')
+            plt.savefig('results_new/tev_pt0.pdf')
+
+        # --- run the protocol --- #
+        mutual_infos = []
+        for t in np.linspace(0, tf, t_steps):
+            mutual_infos.append(protocol_round(H_R, TFD, expV, tev_nt0, tev_pt0, t, display_circs=display_circs))
+
+        # save the mutual infos
+        if subdir is  None:
+            if not os.path.exists('results_new'):
+                os.makedirs('results_new')
+            save_dir = 'results_new'
+        else:
+            if not os.path.exists(f'results_new/{subdir}'):
+                os.makedirs(f'results_new/{subdir}')
+            save_dir = f'results_new/{subdir}'
+
+        mutual_infos = np.array(mutual_infos)
+        timestamp = int(time.time())
+        np.save(os.path.join(save_dir, f'mutual_infos_{N_m}_{ans}_{mu}_{timestamp}.npy'), mutual_infos)
+
+        # make the plot
+        plt.figure(figsize=(10, 5))
+        plt.plot(np.linspace(0, tf, t_steps), mutual_infos)
+        plt.xlabel('Time')
+        plt.ylabel('Mutual Information')
+        plt.title(f'Mutual Information for $N_m = {N_m}$, ans = {ans}, $\mu = {mu}$')
+        plt.savefig(os.path.join(save_dir, f'mutual_info_{N_m}_{ans}__{mu}_{timestamp}.pdf'))
+
+## ---- benchmarking functions ---- ##
 def run_vqe_for_ansatz(ans, H_LR, V, display_circs=False):
         '''helper function for parallelization'''
         diff = run_VQE(H_LR, V, ans=ans, benchmark=True, display_circs=display_circs)  # Assuming run_VQE is defined elsewhere
         return ans, diff
 
-def benchmark_vqe(N_m, num_iter, max_ans=3, display_circs=False):
+def benchmark_vqe(N_m, num_iter, max_ans=4, display_circs=False):
     '''for each ansatz 0 - 2, calculate difference between learned and exact min eigenvalue for num_iter iterations'''
     if not os.path.exists('results_new'):
         os.makedirs('results_new')
@@ -505,11 +612,10 @@ def benchmark_vqe(N_m, num_iter, max_ans=3, display_circs=False):
     results = {i: [] for i in range(max_ans+1)}
 
     for i in trange(num_iter):
-        print(f'Iteration {i}')
         # get the hamiltonians
         H_LR, H_L, H_R = get_H_LR(N_m)
         V = get_V(N_m)
-        print('Running VQE...')
+        # print('Running VQE...')
         
         local_results = []
         # Execute the tasks in parallel
@@ -656,7 +762,8 @@ def run_reconstruction(angles_path='results_new/angles_3_1708293092.npy', t_path
     '''runs the reconstructed circuit with the learned parameters, angles, and either simulates or runs on hardware'''
 
     if simulate:
-        shots=10000
+        # shots=10000
+        shots=2000
     else:
         shots=2000
 
@@ -683,10 +790,10 @@ def run_reconstruction(angles_path='results_new/angles_3_1708293092.npy', t_path
         I_angles = []
         for i in range(num_times):
             # get the ansatz
-            ansatz = get_ansatz(config, simulate=simulate)
+            ansatz = get_ansatz(config, simulate=False)
             print(f'angle: {angle}, time: {i}')
-            # print('Number of gates:', ansatz.count_ops())
-            # print('Number of qubits:', ansatz.num_qubits)
+            print('Number of gates:', ansatz.count_ops())
+            print('Number of qubits:', ansatz.num_qubits)
             # apply the parameters to the ansatz
             ansatz = ansatz.assign_parameters(angle)
             # simulate or run on hardware
@@ -789,15 +896,257 @@ def plot_angles(angles_path='results_new/angles_3_1708293092.npy'):
     plt.savefig('results_new/angles.pdf')
     plt.show()
 
+## ---- alternate strategy for simplifying Hamiltonians ---- ##
+def loss_h(params, H_targ_mat, left, lambda_fix=None):
+    '''loss function for the left Hamiltonian with regularization term lambda_.
+
+    Params:
+        params (np.array): parameters for the Hamiltonian
+        H_targ_mat (np.array): target Hamiltonian
+        left (bool): whether to simplify the left or right Hamiltonian
+        lambda_fix (float): if not None, will fix the lambda_ value to this value, so leave as None if you want to optimize for lambda_ as well
+    
+    '''
+    if lambda_fix is None:
+        lambda_ = params[-1]
+        params = params[:-1]
+    else:
+        lambda_ = lambda_fix
+    # get the Hamiltonian
+    H_pred = get_SYK_from_params(N_m, left=left, params=params).to_matrix()
+    # return the norm of diff
+    return np.abs(np.linalg.norm(H_targ_mat - H_pred) + lambda_ * np.linalg.norm(params))
+
+def random_h_coeff(N_m, lambda_fix=None): 
+    coeff = get_random_SYK_params(N_m)
+    coeff = coeff.flatten()
+    # randomly set all but 10% of the coefficients to 0
+    # mask = np.random.choice([0, 1], size=coeff.shape, p=[0.9, 0.1])
+    # coeff = coeff * mask
+    if lambda_fix is None: # if no lambda provided, will assume we want to optimize for that as well
+        lambda_ = np.random.uniform(0, 1)
+        return np.append(coeff, lambda_)
+    else:
+        return coeff
+
+def simplify_H(N_m, left=True, gd=True, lambda_fix=None, num_rand=100000, gd_rand_try=1000, gd_N=1000, gd_lr=0.0001, gd_tol=1e-5, parallelize=True):
+    '''simplifies the Hamiltonian by removing terms that are not relevant for the mutual information calculation
+    
+    Params:
+        N_m (int): number of Majorana fermions
+        left (bool): whether to simplify the left or right Hamiltonian
+        gd (bool): whether to use gradient descent or genetic alg
+        lambda_fix (float): if not None, will fix the lambda_ value to this value, so leave as None if you want to optimize for lambda_ as well
+    
+    
+    '''
+    # get H_L and H_R
+    H = get_SYK(N_m, left=left)
+
+    print('got Hamiltonians')
+
+    # find the simplest representation that most closely approximates the original Hamiltonian #
+    # perform ridge regression to find the simplest representation
+    # initialize the parameters
+
+    # partialize the loss function
+    loss_h_ = partial(loss_h, H_targ_mat=H.to_matrix(), left=True, lambda_fix=lambda_fix)
+
+    random_h_coeff_N_m = partial(random_h_coeff, N_m, lambda_fix=lambda_fix)
+
+    # t0 = time.time()
+    # x0 = random_h_coeff_N_m()
+    # print(f'Initial loss: {loss_h_(x0)}')
+    # print(f'Elapsed time: {time.time() - t0}')
+    
+    # run the optimizer
+    # x_best, loss_best = trabbit(loss_h_, random_h_coeff_N_m, alpha=0.0001, temperature=0.01, verbose=True)
+    # run custom GD
+    # first pick best random initialization
+    if gd:
+        loss_best = np.inf
+        for i in range(gd_rand_try):
+            x0 = random_h_coeff_N_m()
+            loss = loss_h_(x0)
+            if loss < loss_best:
+                loss_best = loss
+                x_best = x0
+        print(f'Best rand loss for H_{left}: {loss_best}')
+        for i in range(gd_N):
+            grad = approx_fprime(x_best, loss_h_, 1e-6)
+            x_best -= gd_lr * grad
+            loss_best = loss_h_(x_best)
+            print(f'Loss at iteration {i}: {loss_best}')
+            if loss_best < gd_tol:
+                break    
+    else:
+        loss_best = np.inf
+        if not parallelize:
+            for i in trange(num_rand):
+                # every multiple of 1000, print out the loss
+                if i % 1000 == 0:
+                    print(f'Loss at iteration {i}: {loss_best}')
+                x0 = random_h_coeff_N_m()
+                loss = loss_h_(x0)
+                if loss < loss_best:
+                    loss_best = loss
+                    x_best = x0
+
+        # run in parallel
+        else:
+            with ProcessPoolExecutor() as executor:
+                futures = [executor.submit(loss_h_, random_h_coeff_N_m) for _ in trange(num_rand)]
+                
+                # Process the results as they complete
+                for future in as_completed(futures):
+                    loss = future.result()
+                    if loss < loss_best:
+                        loss_best = loss
+                        x_best = x0
+
+    print(f'Best loss for H_{left}: {loss_best}. Number of non-zero terms: {np.count_nonzero(x_best[:-1])}')
+    if lambda_fix is None:
+        print(f'Best lambda: {x_best[-1]}')
+    else:
+        print(f'Fixed lambda: {lambda_fix}')
+
+    # save the results
+    timestamp = int(time.time())
+    np.save(f'results_new/params_{left}_{timestamp}_{lambda_fix}.npy', x_best)
+    np.save(f'results_new/loss_{left}_{timestamp}_{lambda_fix}.npy', loss_best)
+    np.save(f'results_new/H_{left}_{timestamp}_{lambda_fix}.npy', H.to_matrix())
+
+    return x_best, loss_best
+
+## ---- making plots for thesis ---- ##
+def plot_reconstruct(sim_path1=['results_new/I_3_1708557041_True.npy', 'results_new/I_sem_3_1708557041_True.npy'], sim_path2 = ['results_new/I_3_1708411432.npy', 'results_new/I_sem_3_1708411432.npy'], data_path=['results_new/I_3_1708513045_False.npy', 'results_new/I_sem_3_1708513045_False.npy'], comparison_path='mi_data/mi_2.csv'):
+
+    # load the data
+    I1 = np.load(sim_path1[0])
+    I_sem1 = np.load(sim_path1[1])
+    I2 = np.load(sim_path2[0])
+    I_sem2 = np.load(sim_path2[1])
+    I3 = np.load(data_path[0])
+    I_sem3 = np.load(data_path[1])
+    t_I_ls = np.loadtxt(comparison_path, delimiter=',')
+    t_ls = t_I_ls[:, 0]
+    I_actual_ls = t_I_ls[:, 1]
+
+    # plot
+    plt.figure(figsize=(10, 10))
+    plt.scatter(t_ls, I_actual_ls, label='Actual', color='red')
+    plt.plot(t_ls, I_actual_ls, color='red')
+    plt.errorbar(t_ls, I1, yerr=I_sem1, fmt='o', color='orange', label='Simulator, 2000 shots')
+    plt.plot(t_ls, I1, color='orange')
+    plt.errorbar(t_ls, I2, yerr=I_sem2, fmt='o', color='gold', label='Simulator, 10000 shots')
+    plt.plot(t_ls, I2, color='gold')
+    plt.errorbar(t_ls, I3, yerr=I_sem3, fmt='o', color='blue', label='Kyoto Processor, 2000 shots')
+    plt.plot(t_ls, I3, color='blue')
+    plt.xlabel('Time')
+    plt.ylabel('Mutual Information')
+    plt.legend()
+    plt.title('Mutual Information for Reconstructed Circuit')
+    plt.savefig('results_new/I_reconstruct_total.pdf')
+    plt.show()
+
+def plot_MI_benchmark(subdir='1708211517.5868132', standardize=False):
+
+    subdir0 = subdir
+    subdir = os.path.join('results_new',subdir)
+
+    # get all the .npy
+    files = os.listdir(subdir)
+    I_files = [f for f in files if '.npy' in f]
+
+    # split file names by '_': [-2] gives the mu value, [-3] gives the ansatz
+    I_dict = {}
+    ans_unique = []
+    mu_unique = []
+    for f in I_files:
+        I = np.load(os.path.join(subdir, f))
+        mu = f.split('_')[-2]
+        ans = f.split('_')[-3]
+        ans_unique.append(ans)
+        mu_unique.append(mu)
+        # append to dictionary
+        # check if key exists. if not, create it with I as the value, otherwise append to the list
+        if (ans, mu) not in I_dict:
+            I_dict[(ans, mu)] = [I]
+        else:
+            # add each element of I to the list
+            I_dict[(ans, mu)].append(I)
+
+    # get unique values
+    ans_unique = list(set(ans_unique))
+    # sort ans small to large
+    ans_unique = sorted(ans_unique, key=lambda x: int(x))
+    mu_unique = list(set(mu_unique))
+    # sort mu small to large
+    mu_unique = sorted(mu_unique, key=lambda x: int(x))
+    num_ans = len(ans_unique)
+    num_mu = len(mu_unique)
+
+
+    # plot a 4x4 grid of ansatz vs mu
+    fig, axs = plt.subplots(num_ans, num_mu, figsize=(25, 25))
+    for i, ans in enumerate(ans_unique):
+        for j, mu in enumerate(mu_unique):
+            I_ls = I_dict[(ans, mu)]
+            for I in I_ls:
+                x = np.linspace(0, 10, len(I))
+                
+                if standardize:
+                    # Standardize I
+                    I_mean = np.mean(I)
+                    I_std = np.std(I)
+                    I_standardized = (I - I_mean) / I_std
+                    # Plot standardized I
+                    axs[i, j].plot(x, I_standardized, marker='o')
+                else:
+                    # Plot original I
+                    axs[i, j].plot(x, I, marker='o')
+            axs[i, j].set_title(f'Ansatz {ans}, $\mu = {mu}$')
+            axs[i, j].set_xlabel('Time')
+            axs[i, j].set_ylabel('Mutual Information')
+
+    plt.tight_layout()
+    # plt.suptitle('Mutual Information for VQE Benchmark')
+    plt.savefig(f'results_new/mi_benchmark_{subdir0}_{standardize}.pdf')
+
+def plot_H(N_m):
+    '''Plots H_LR'''
+    # make a plot of an H matrix
+    H_LR, H_L, H_R = get_H_LR(N_m)
+    H = H_LR.to_matrix()
+    # get both the real and imaginary parts
+    H_real = np.abs(H)
+    H_imag = np.angle(H)
+    H_imag = np.where(H_real > 1e-10, H_imag, 0)
+    # plot the real part with color bars
+    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+    a0 = ax[0].imshow(H_real, cmap='viridis')
+    fig.colorbar(a0 , ax=ax[0])
+    ax[0].set_title('Magnitude')
+    ax1 = ax[1].imshow(H_imag, cmap='viridis')
+    ax[1].set_title('Angle')
+    fig.colorbar(a0, ax=ax[1])
+    plt.tight_layout()
+    # timestamp
+    timestamp = int(time.time())
+    plt.savefig(f'results_new/H_matrix_{N_m}_{timestamp}.pdf')        
 
 if __name__ == '__main__':
     N_m=10
-    # benchmark_vqe(N_m, num_iter=1, display_circs=True)
-    # benchmark_mi(N_m, num_reps=5)
+    # benchmark_vqe(N_m, num_iter=100, display_circs=False)
+    # benchmark_mi(N_m, num_reps=1000)
     # reconstruct_total()
-    # run_reconstruction(simulate=False)
+    # run_reconstruction(simulate=True)
     # plot_angles()
-    full_protocol(N_m, tf = 2, t_steps=1, display_circs=True)
-  
-
-    
+    # for _ in trange(5):
+    #     full_protocol(N_m, ans=4, mu = 0, display_circs=False)
+    # repeat_full_protocol(N_m, num_reps=2)
+    # plot_reconstruct()
+    # plot_MI_benchmark(subdir='1708669147.5512059', standardize=False)
+    # plot_MI_benchmark(subdir='1708669147.5512059', standardize=True)
+    # plot_H(N_m)
+    simplify_H(N_m, left=True, gd=False, lambda_fix=None, num_rand=1000000, parallelize=False)

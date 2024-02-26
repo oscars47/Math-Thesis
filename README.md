@@ -3,6 +3,39 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+## 2/26/24
+* parallelization crashed again bc can't pickle partialized function...
+* result from 10^6 random with setting 10% of terms to 0 is 
+    Best loss for H_True: 1.293806055364993. Number of non-zero terms: 29
+* realized there's a bit of redudnancy there bc the lambda term should help us remove out terms so this may just be not helpful; rerunning.
+
+* run simulation with their learned hamiltonian!!
+
+
+## 2/25/24
+* realized using genetic algorithm by randomly generating params is MUCH faster than gd
+* updated ```random_h_coeff``` to randomly set all but 10% of coefficients to 0
+* running 3 experiments: 1. grad descent with lambda_fix = .01, 2. random with lambda_fix = 0.01, 3. random with no lambda_fix. hypothesis for gd is that optimizing for lambda as well was taking too long; updated ```loss_h``` accordingly
+** lambda_fix = None and genetic had best performance in terms of speed
+** added parallelization which doubled speed
+* want to investigate quantum scarring --> analog of periodic orbits *
+* if we have a valid simplified hamiltonian then can do the other test measures?
+
+## 2/24/24
+* did standardization on each MI output; now much clearer to see.
+* adding ```simplify_H()``` code; idea is to perform ridge regression on the coefficients of the terms in the pauli sum
+** to do this, added ```get_SYK_params()``` and ```get_random_SYK_params()``` as separate 
+** each run is about 0.01 seconds
+
+## 2/22/24
+* got MI 100
+* ran MI 1000
+* ran vqe 100
+
+## 2/21/24
+* VQE/MI still running; MI crashed
+* running 2000 shots x 5 for ibmq_qasm in order to compare better to hardware results
+
 ## 2/20/24
 * BIG DAY!! added compute_mi_actual(), which uses  
 * total time between submission to ibm_kyoto and execution is ~10 mins, but note that can only execute 3 instances at a time, so just running in series so it is easy to identify which job is which if the local device crashes since queue to execution time is reasonable.
@@ -12,6 +45,11 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 * for future reference, to initialize Qiskit IBMQ, need to run a python file with the following code once:
     from qiskit_ibm_provider import IBMProvider
     IBMProvider.save_account(API_KEY, overwrite=True)
+* wrote up chapter 3 of thesis to explain the simulation process
+* realized that ref. 3 used 2*N_m-1 CZs -- so I will add ansatz 4. 
+** problem is realized that when mu = 0 still have MI > 0... also shape of peak is still not consistent.  
+* ran benchmark of VQE with 1000 circuits
+* running benchmark of MI with 1000 circuits
 
 
 ## 2/19/24
