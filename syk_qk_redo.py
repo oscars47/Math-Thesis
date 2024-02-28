@@ -119,11 +119,20 @@ def get_SYK_from_params(n_majorana, params,left=True):
 
     return H
 
-def get_random_SYK_params(n_majorana, J=2):
-    '''returns random SYK params for a given number of Majorana fermions, in form of n_majorana x n_majorana x n_majorana x n_majorana tensor'''
+def get_random_SYK_params(n_majorana, J=2, binned=False, num_bins=10):
+    '''returns random SYK params for a given number of Majorana fermions, in form of n_majorana x n_majorana x n_majorana x n_majorana tensor
+
+    Params:
+        n_majorana (int): number of Majorana fermions
+        J (float): effective variance
+        binned (bool): whether to bin the Jijkl values
+    
+    '''
 
     var = factorial(3) * J**2 / (n_majorana**3)
     Jp = np.random.normal(0, np.sqrt(var), (n_majorana, n_majorana, n_majorana, n_majorana))
+
+    bins = np.linspace(-np.sqrt(var), np.sqrt(var), num_bins)
 
     # Ensure Jijkl is antisymmetric
     for i in range(n_majorana):
@@ -132,6 +141,17 @@ def get_random_SYK_params(n_majorana, J=2):
                 for l in range(n_majorana):
                     if i >= j or j >= k or k >= l:
                         Jp[i, j, k, l] = 0 
+                    if binned:
+                        index = np.digitize(Jp[i, j, k, l], bins)-1
+                        Jp[i, j, k, l] = bins[index]
+
+    # plot histogram of Jijkl values
+    # Jp_flat = Jp.flatten()
+    # plt.hist(Jp_flat[np.abs(Jp_flat)>0], bins=100)
+    # plt.xlabel('Jijkl')
+    # plt.ylabel('Frequency')
+    # plt.title('Histogram of Jijkl values')
+    # plt.show()
 
     return Jp
 
@@ -917,8 +937,8 @@ def loss_h(params, H_targ_mat, left, lambda_fix=None):
     # return the norm of diff
     return np.abs(np.linalg.norm(H_targ_mat - H_pred) + lambda_ * np.linalg.norm(params))
 
-def random_h_coeff(N_m, lambda_fix=None): 
-    coeff = get_random_SYK_params(N_m)
+def random_h_coeff(N_m, lambda_fix=None, binned=False): 
+    coeff = get_random_SYK_params(N_m, binned=binned)
     coeff = coeff.flatten()
     # randomly set all but 10% of the coefficients to 0
     # mask = np.random.choice([0, 1], size=coeff.shape, p=[0.9, 0.1])
@@ -927,9 +947,10 @@ def random_h_coeff(N_m, lambda_fix=None):
         lambda_ = np.random.uniform(0, 1)
         return np.append(coeff, lambda_)
     else:
+        print(f'num non-zero terms: {np.count_nonzero(coeff)}')
         return coeff
 
-def simplify_H(N_m, left=True, gd=True, lambda_fix=None, num_rand=100000, gd_rand_try=1000, gd_N=1000, gd_lr=0.0001, gd_tol=1e-5, parallelize=True):
+def simplify_H(N_m, left=True, gd=True, lambda_fix=None, num_rand=100000, gd_rand_try=1000, gd_N=1000, gd_lr=0.0001, gd_tol=1e-5, parallelize=True, binned=False):
     '''simplifies the Hamiltonian by removing terms that are not relevant for the mutual information calculation
     
     Params:
@@ -937,8 +958,14 @@ def simplify_H(N_m, left=True, gd=True, lambda_fix=None, num_rand=100000, gd_ran
         left (bool): whether to simplify the left or right Hamiltonian
         gd (bool): whether to use gradient descent or genetic alg
         lambda_fix (float): if not None, will fix the lambda_ value to this value, so leave as None if you want to optimize for lambda_ as well
-    
-    
+        num_rand (int): number of random initializations to try
+        gd_rand_try (int): number of random initializations to try for GD
+        gd_N (int): number of iterations for GD
+        gd_lr (float): learning rate for GD
+        gd_tol (float): tolerance for GD
+        parallelize (bool): whether to parallelize the random initializations
+        binned (bool): whether to use binned or unbinned coefficients
+
     '''
     # get H_L and H_R
     H = get_SYK(N_m, left=left)
@@ -952,7 +979,7 @@ def simplify_H(N_m, left=True, gd=True, lambda_fix=None, num_rand=100000, gd_ran
     # partialize the loss function
     loss_h_ = partial(loss_h, H_targ_mat=H.to_matrix(), left=True, lambda_fix=lambda_fix)
 
-    random_h_coeff_N_m = partial(random_h_coeff, N_m, lambda_fix=lambda_fix)
+    random_h_coeff_N_m = partial(random_h_coeff, N_m, lambda_fix=lambda_fix, binned=binned)
 
     # t0 = time.time()
     # x0 = random_h_coeff_N_m()
@@ -1017,6 +1044,20 @@ def simplify_H(N_m, left=True, gd=True, lambda_fix=None, num_rand=100000, gd_ran
     np.save(f'results_new/H_{left}_{timestamp}_{lambda_fix}.npy', H.to_matrix())
 
     return x_best, loss_best
+
+def test_simplify_H(H_actual_path, params_reconstr_path):
+    '''tests the simplified Hamiltonian by comparing the mutual information for the reconstructed circuit with the actual circuit'''
+    # load the actual Hamiltonian
+    H_actual = np.load(os.path.join('results_new', H_actual_path))
+    # load the reconstructed parameters
+    params_reconstr = np.load(os.path.join('results_new', params_reconstr_path))[:-1]
+    # get the reconstructed Hamiltonian
+    H_reconstr = get_SYK_from_params(N_m, left=True, params=params_reconstr)
+    H_reconstr = H_reconstr.to_matrix()
+    # get the mutual information for the actual and reconstructed Hamiltonians
+    dist = np.linalg.norm(H_actual - H_reconstr)
+    print(f'Distance between actual and reconstructed Hamiltonians: {dist}')
+    return dist
 
 ## ---- making plots for thesis ---- ##
 def plot_reconstruct(sim_path1=['results_new/I_3_1708557041_True.npy', 'results_new/I_sem_3_1708557041_True.npy'], sim_path2 = ['results_new/I_3_1708411432.npy', 'results_new/I_sem_3_1708411432.npy'], data_path=['results_new/I_3_1708513045_False.npy', 'results_new/I_sem_3_1708513045_False.npy'], comparison_path='mi_data/mi_2.csv'):
@@ -1105,9 +1146,9 @@ def plot_MI_benchmark(subdir='1708211517.5868132', standardize=False):
                 else:
                     # Plot original I
                     axs[i, j].plot(x, I, marker='o')
-            axs[i, j].set_title(f'Ansatz {ans}, $\mu = {mu}$')
-            axs[i, j].set_xlabel('Time')
-            axs[i, j].set_ylabel('Mutual Information')
+            axs[i, j].set_title(f'Ansatz {ans}, $\mu = {mu}$', fontsize=15)
+            axs[i, j].set_xlabel('Time', fontsize=12)
+            axs[i, j].set_ylabel('Mutual Information', fontsize=12)
 
     plt.tight_layout()
     # plt.suptitle('Mutual Information for VQE Benchmark')
@@ -1138,7 +1179,7 @@ def plot_H(N_m):
 if __name__ == '__main__':
     N_m=10
     # benchmark_vqe(N_m, num_iter=100, display_circs=False)
-    # benchmark_mi(N_m, num_reps=1000)
+    # benchmark_mi(N_m, num_reps=100)
     # reconstruct_total()
     # run_reconstruction(simulate=True)
     # plot_angles()
@@ -1146,7 +1187,9 @@ if __name__ == '__main__':
     #     full_protocol(N_m, ans=4, mu = 0, display_circs=False)
     # repeat_full_protocol(N_m, num_reps=2)
     # plot_reconstruct()
-    # plot_MI_benchmark(subdir='1708669147.5512059', standardize=False)
-    # plot_MI_benchmark(subdir='1708669147.5512059', standardize=True)
+    # plot_MI_benchmark(subdir='1709029808.6135924', standardize=False)
+    # plot_MI_benchmark(subdir='1709029808.6135924', standardize=True)
     # plot_H(N_m)
-    simplify_H(N_m, left=True, gd=False, lambda_fix=None, num_rand=1000000, parallelize=False)
+
+    # simplify_H(N_m, left=True, gd=False, lambda_fix=None, num_rand=1000000, parallelize=False, binned=True)
+    test_simplify_H('H_True_1709093832_None.npy', 'params_True_1709093832_None.npy')

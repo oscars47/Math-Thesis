@@ -3,13 +3,23 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+* run simulation with their learned hamiltonian!!
+
+## 2/27/24
+* realized the mi plots i made before were for N_m = 6, so remade them for N_m = 10, also made font on the titles slightly larger
+* trying binned approach for simplify_H generating params -- actually it's quite slow....
+* results of 1 million random param:
+    Best loss for H_True: 0.8749393635473162. Number of non-zero terms: 210
+    Best lambda: 0.030888040317091803
+
+    Distance between actual and reconstructed Hamiltonians: 0.8103448462028633
+
 ## 2/26/24
 * parallelization crashed again bc can't pickle partialized function...
 * result from 10^6 random with setting 10% of terms to 0 is 
     Best loss for H_True: 1.293806055364993. Number of non-zero terms: 29
 * realized there's a bit of redudnancy there bc the lambda term should help us remove out terms so this may just be not helpful; rerunning.
-
-* run simulation with their learned hamiltonian!!
+** for N_m = 10, about 9 iterations / s.
 
 
 ## 2/25/24
