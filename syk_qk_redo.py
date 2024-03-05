@@ -14,6 +14,7 @@ from qiskit.opflow import I, X, Y, Z, PauliSumOp, PauliOp
 from qiskit.quantum_info import partial_trace, DensityMatrix, entropy
 from qiskit_experiments.framework import ParallelExperiment
 from qiskit_experiments.library import StateTomography
+from qiskit_ibm_runtime import Options
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import matplotlib.pyplot as plt
 import os, time, json
@@ -700,7 +701,7 @@ def benchmark_mi(N_m, num_reps=5):
                 print(f"Task generated an exception: {e}")
 
 ## ---- reconstructing the mutual info with preset circuit ---- ##
-def get_ansatz(config, simulate=True):
+def get_ansatz(config, simulate=True, resilience_level=1):
     '''generates the parametrized ansatz for the given number of qubits. Default is U3 gates on each qubit and then entangling all qubits in a chain.'''
     ansatz = QuantumCircuit(config)
     # Define parameters for the U3 gates
@@ -720,9 +721,9 @@ def get_ansatz(config, simulate=True):
         ansatz.cx(i, i+1)
 
     if simulate:
-        ansatz = transpile(ansatz, optimization_level=1, basis_gates=['cx', 'u3'])
+        ansatz = transpile(ansatz, optimization_level=1, basis_gates=['cx', 'u3'], resilience_level=resilience_level)
     else: # ECR, ID, RZ, SX, X
-        ansatz = transpile(ansatz, optimization_level=1, basis_gates=['ecr', 'id', 'rz', 'sx', 'x'],)
+        ansatz = transpile(ansatz, optimization_level=1, basis_gates=['ecr', 'id', 'rz', 'sx', 'x'],resilience_level=resilience_level)
 
     return ansatz
 
@@ -778,13 +779,10 @@ def reconstruct_total(mi_path='mi_data/mi_2.csv', config=3):
     print(f'Avg loss: {np.mean(loss_ls)}')
     print(f'SEM dev loss: {np.std(loss_ls) / np.sqrt(len(loss_ls) - 1)}')
     
-def run_reconstruction(angles_path='results_new/angles_3_1708293092.npy', t_path = 'mi_data/mi_2.csv', num_times = 5, config=3, simulate=True):
+def run_reconstruction(angles_path='results_new/angles_3_1708293092.npy', t_path = 'mi_data/mi_2.csv', num_times = 5, config=3, simulate=True, resilience_level=1, shots=10000):
     '''runs the reconstructed circuit with the learned parameters, angles, and either simulates or runs on hardware'''
 
-    if simulate:
-        # shots=10000
-        shots=2000
-    else:
+    if not simulate:
         shots=2000
 
     # load the angles
@@ -799,18 +797,18 @@ def run_reconstruction(angles_path='results_new/angles_3_1708293092.npy', t_path
         provider = IBMProvider()
         backend = provider.get_backend('ibm_kyoto')
 
-    def execute_task(angle, config, simulate, backend):
-        '''objective function for the optimizer'''
-        ansatz = get_ansatz(config, simulate=simulate)
-        ansatz = ansatz.assign_parameters(angle)
-        return compute_mi_actual(ansatz, backend, shots=shots)
+    # def execute_task(angle, config, simulate, backend):
+    #     '''objective function for the optimizer'''
+    #     ansatz = get_ansatz(config, simulate=simulate)
+    #     ansatz = ansatz.assign_parameters(angle)
+    #     return compute_mi_actual(ansatz, backend, shots=shots)
 
     # if simulate:
     for angle in angles:
         I_angles = []
         for i in range(num_times):
             # get the ansatz
-            ansatz = get_ansatz(config, simulate=False)
+            ansatz = get_ansatz(config, simulate=False, resilience_level=resilience_level)
             print(f'angle: {angle}, time: {i}')
             print('Number of gates:', ansatz.count_ops())
             print('Number of qubits:', ansatz.num_qubits)
@@ -949,14 +947,52 @@ def random_h_coeff(N_m, lambda_fix=None, binned=False):
     else:
         print(f'num non-zero terms: {np.count_nonzero(coeff)}')
         return coeff
+    
+def metropolis_step(current_params, current_loss, loss_function, temperature):
+    '''implement single step of Metropolis-Hastings algorithm for MCMC optimization of the loss function.'''
+    perturbation = np.random.normal(0, 1, current_params.shape)
+    new_params = current_params + temperature * perturbation
+    
+    # compute loss for new parameters
+    new_loss = loss_function(new_params)
+    
+    # compute acceptance probability
+    if new_loss < current_loss:
+        accept = True
+    else:
+        delta_loss = current_loss - new_loss
+        accept_probability = np.exp(delta_loss / temperature)
+        accept = np.random.rand() < accept_probability
+    
+    # accept or reject the new parameters
+    if accept:
+        return new_params, new_loss
+    else:
+        return current_params, current_loss
 
-def simplify_H(N_m, left=True, gd=True, lambda_fix=None, num_rand=100000, gd_rand_try=1000, gd_N=1000, gd_lr=0.0001, gd_tol=1e-5, parallelize=True, binned=False):
+def mcmc_optimize(loss_function, initial_params, n_iterations, initial_temperature, annealing_rate=0.99):
+    '''Optimize the loss function using the Metropolis-Hastings algorithm.'''
+    current_params = initial_params
+    current_loss = loss_function(current_params)
+    temperature = initial_temperature
+    
+    for i in range(n_iterations):
+        current_params, current_loss = metropolis_step(current_params, current_loss, loss_function, temperature)
+        # simulated annealing; automatically cool
+        temperature *= annealing_rate
+        
+        # if i % 100 == 0:  # Print progress every 100 iterations
+        print(f'Iteration {i}, Loss: {current_loss}, Temperature: {temperature}')
+    
+    return current_params, current_loss
+
+def simplify_H(N_m, left=True, method=True, lambda_fix=None, num_rand=100000, gd_rand_try=1000, gd_N=1000, gd_lr=0.0001, gd_tol=1e-5, temp_init = 0.01, parallelize=True, binned=False):
     '''simplifies the Hamiltonian by removing terms that are not relevant for the mutual information calculation
     
     Params:
         N_m (int): number of Majorana fermions
         left (bool): whether to simplify the left or right Hamiltonian
-        gd (bool): whether to use gradient descent or genetic alg
+        method (int): whether to use random search alg (0), gradient descent (1) or MCMC (2)
         lambda_fix (float): if not None, will fix the lambda_ value to this value, so leave as None if you want to optimize for lambda_ as well
         num_rand (int): number of random initializations to try
         gd_rand_try (int): number of random initializations to try for GD
@@ -990,7 +1026,7 @@ def simplify_H(N_m, left=True, gd=True, lambda_fix=None, num_rand=100000, gd_ran
     # x_best, loss_best = trabbit(loss_h_, random_h_coeff_N_m, alpha=0.0001, temperature=0.01, verbose=True)
     # run custom GD
     # first pick best random initialization
-    if gd:
+    if method==1:
         loss_best = np.inf
         for i in range(gd_rand_try):
             x0 = random_h_coeff_N_m()
@@ -1006,7 +1042,7 @@ def simplify_H(N_m, left=True, gd=True, lambda_fix=None, num_rand=100000, gd_ran
             print(f'Loss at iteration {i}: {loss_best}')
             if loss_best < gd_tol:
                 break    
-    else:
+    elif method == 0:
         loss_best = np.inf
         if not parallelize:
             for i in trange(num_rand):
@@ -1031,6 +1067,11 @@ def simplify_H(N_m, left=True, gd=True, lambda_fix=None, num_rand=100000, gd_ran
                         loss_best = loss
                         x_best = x0
 
+    elif method == 2:
+        x_best, loss_best = mcmc_optimize(loss_h_, random_h_coeff_N_m(), gd_N, temp_init)
+    else:
+        raise ValueError('Invalid method')
+
     print(f'Best loss for H_{left}: {loss_best}. Number of non-zero terms: {np.count_nonzero(x_best[:-1])}')
     if lambda_fix is None:
         print(f'Best lambda: {x_best[-1]}')
@@ -1039,9 +1080,10 @@ def simplify_H(N_m, left=True, gd=True, lambda_fix=None, num_rand=100000, gd_ran
 
     # save the results
     timestamp = int(time.time())
-    np.save(f'results_new/params_{left}_{timestamp}_{lambda_fix}.npy', x_best)
-    np.save(f'results_new/loss_{left}_{timestamp}_{lambda_fix}.npy', loss_best)
-    np.save(f'results_new/H_{left}_{timestamp}_{lambda_fix}.npy', H.to_matrix())
+    print(f'timestamp: {timestamp}')
+    np.save(f'results_new/params_{left}_{timestamp}_{lambda_fix}_{method}.npy', x_best)
+    np.save(f'results_new/loss_{left}_{timestamp}_{lambda_fix}_{method}.npy', loss_best)
+    np.save(f'results_new/H_{left}_{timestamp}_{lambda_fix}_{method}.npy', H.to_matrix())
 
     return x_best, loss_best
 
@@ -1050,13 +1092,15 @@ def test_simplify_H(H_actual_path, params_reconstr_path):
     # load the actual Hamiltonian
     H_actual = np.load(os.path.join('results_new', H_actual_path))
     # load the reconstructed parameters
-    params_reconstr = np.load(os.path.join('results_new', params_reconstr_path))[:-1]
+    params_reconstr_wridge = np.load(os.path.join('results_new', params_reconstr_path))
+    params_reconstr = params_reconstr_wridge[:-1]
     # get the reconstructed Hamiltonian
     H_reconstr = get_SYK_from_params(N_m, left=True, params=params_reconstr)
     H_reconstr = H_reconstr.to_matrix()
     # get the mutual information for the actual and reconstructed Hamiltonians
     dist = np.linalg.norm(H_actual - H_reconstr)
     print(f'Distance between actual and reconstructed Hamiltonians: {dist}')
+    print(f'Loss for reconstructed Hamiltonian: {loss_h(params_reconstr_wridge, H_actual, left=True)}')
     return dist
 
 ## ---- making plots for thesis ---- ##
@@ -1181,7 +1225,7 @@ if __name__ == '__main__':
     # benchmark_vqe(N_m, num_iter=100, display_circs=False)
     # benchmark_mi(N_m, num_reps=100)
     # reconstruct_total()
-    # run_reconstruction(simulate=True)
+    # run_reconstruction(simulate=True, resilience_level=3)
     # plot_angles()
     # for _ in trange(5):
     #     full_protocol(N_m, ans=4, mu = 0, display_circs=False)
@@ -1191,5 +1235,5 @@ if __name__ == '__main__':
     # plot_MI_benchmark(subdir='1709029808.6135924', standardize=True)
     # plot_H(N_m)
 
-    # simplify_H(N_m, left=True, gd=False, lambda_fix=None, num_rand=1000000, parallelize=False, binned=True)
-    test_simplify_H('H_True_1709093832_None.npy', 'params_True_1709093832_None.npy')
+    simplify_H(N_m, left=True, method=2, num_rand=1000000, parallelize=False, binned=True, temp_init=0.1, lambda_fix = 0.7)
+    # test_simplify_H('H_True_1709631423_None.npy', 'params_True_1709631423_None.npy')

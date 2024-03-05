@@ -3,7 +3,22 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+
+stuff to do:
 * run simulation with their learned hamiltonian!!
+
+## 3/4/24
+* added metropolis hastings alg for ```simplify_H```. seems to be working well so far; temp_init of ~ 0.4 seems best
+    * did not work. even though with temp_init = 0.1 was able to achieve 
+        Best loss for H_True: 8.219160996247865e-08. Number of non-zero terms: 10000
+    when calculating difference directly, no ridge, got 
+        Distance between actual and reconstructed Hamiltonians: 15.807895907647413
+    I think this is because the lambda term was negative, so even though the loss function was always >= 0, a lot of stuff was allowed to cancel inside the abs val
+    * will fix temp_init at 0.1, then try variety of lambda: 0.01, 0.1, 0.5, 0.7
+
+## 3/2/24
+* found note on error correction: https://docs.quantum.ibm.com/run/configure-error-mitigation. i want to re-run calcultions for MI on Kyoto in March (next IBM cycle) using resilience level 2 or 3.
+* doesn't appear it's possible to set ```resilience_level``` for StateTomography
 
 ## 2/27/24
 * realized the mi plots i made before were for N_m = 6, so remade them for N_m = 10, also made font on the titles slightly larger
