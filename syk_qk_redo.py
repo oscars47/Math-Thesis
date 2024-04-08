@@ -237,6 +237,11 @@ def run_VQE(H_LR, V, beta=4, ans=0, display_circs=False, benchmark=False):
 
     if ans == 0:
         ansatz = EfficientSU2(2*N, reps=1)
+        # print out the circuit in the basis of u3 and cx gates
+        ansatz_t = transpile(ansatz, basis_gates=['cx', 'u3'])
+        # if display_circs:
+        ansatz_t.draw('mpl')
+        plt.savefig('results_new/vqe_circuit_0.pdf')
 
     elif ans == 1 or ans == 2:
         ansatz = QuantumCircuit(2*N)
@@ -1113,9 +1118,9 @@ def test_learned_hamiltonian(N_m=10, ans=0, mu=-12, subdir=None, display_circs=F
     qubits = [[0, 1, 3, 4], [0, 2, 3, 6], [0, 2, 4, 5], [1, 2, 3, 5], [1, 2, 4, 6]]
 
     for i, q in enumerate(qubits):
-        H_L += params[i] * majorana_to_qubit_op(q[0], n_qubits, left=True) * majorana_to_qubit_op(q[1], n_qubits, left=True) * majorana_to_qubit_op(q[2], n_qubits, left=True) * majorana_to_qubit_op(q[3], n_qubits, left=True)
+        H_L += params[i] * (majorana_to_qubit_op(q[0], n_qubits, left=True) @ majorana_to_qubit_op(q[1], n_qubits, left=True) @ majorana_to_qubit_op(q[2], n_qubits, left=True) @ majorana_to_qubit_op(q[3], n_qubits, left=True))
 
-        H_R += params[i] * majorana_to_qubit_op(q[0], n_qubits, left=False) * majorana_to_qubit_op(q[1], n_qubits, left=False) * majorana_to_qubit_op(q[2], n_qubits, left=False) * majorana_to_qubit_op(q[3], n_qubits, left=False)
+        H_R += params[i] * (majorana_to_qubit_op(q[0], n_qubits, left=False) @ majorana_to_qubit_op(q[1], n_qubits, left=False) @ majorana_to_qubit_op(q[2], n_qubits, left=False) @ majorana_to_qubit_op(q[3], n_qubits, left=False))
 
     # Initialize the Hamiltonian for the TFD state
     H_LR = PauliSumOp.from_list([("I" * N_m, 0.0)])
@@ -1179,10 +1184,6 @@ def test_learned_hamiltonian(N_m=10, ans=0, mu=-12, subdir=None, display_circs=F
         plt.savefig(os.path.join(save_dir, f'mutual_info_{N_m}_{ans}_{mu}_{timestamp}.pdf'))
         
     return mutual_infos
-    
-
-        
-
 
 ## ---- making plots for thesis ---- ##
 def plot_reconstruct(sim_path1=['results_new/I_3_1708557041_True.npy', 'results_new/I_sem_3_1708557041_True.npy'], sim_path2 = ['results_new/I_3_1708411432.npy', 'results_new/I_sem_3_1708411432.npy'], data_path=['results_new/I_3_1708513045_False.npy', 'results_new/I_sem_3_1708513045_False.npy'], comparison_path='mi_data/mi_2.csv'):
