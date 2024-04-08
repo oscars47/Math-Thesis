@@ -3,9 +3,14 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+## 4/7/24
+* implementing their hamiltonian. result is nonsensical
 
-stuff to do:
-* run simulation with their learned hamiltonian!!
+## 4/2/24
+* looking into error mitigation
+    - https://qiskit-extensions.github.io/qiskit-experiments/manuals/measurement/readout_mitigation.html
+    - not quite sure how to implement for state tomography
+    - can try to do a parallel experiment tho
 
 ## 3/4/24
 * added metropolis hastings alg for ```simplify_H```. seems to be working well so far; temp_init of ~ 0.4 seems best
