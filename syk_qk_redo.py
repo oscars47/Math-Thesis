@@ -548,7 +548,7 @@ def full_protocol(N_m, tf = 10, ans = 0, t_steps = 10, t0= 2.8, mu=-12, subdir=N
         plt.xlabel('Time')
         plt.ylabel('Mutual Information')
         plt.title(f'Mutual Information for $N_m = {N_m}$, ans = {ans}, $\mu = {mu}$')
-        plt.savefig(os.path.join(save_dir, f'mutual_info_{N_m}_{ans}__{mu}_{timestamp}.pdf'))
+        plt.savefig(os.path.join(save_dir, f'mutual_info_{N_m}_{ans}_{mu}_{timestamp}.pdf'))
         
     return mutual_infos
 
@@ -1103,6 +1103,87 @@ def test_simplify_H(H_actual_path, params_reconstr_path):
     print(f'Loss for reconstructed Hamiltonian: {loss_h(params_reconstr_wridge, H_actual, left=True)}')
     return dist
 
+## ---- test their learned hamiltonian ---- ##
+def test_learned_hamiltonian(N_m=10, ans=0, mu=-12, subdir=None, display_circs=False, plot_result=True, t0=2.8, tf=10, t_steps=10):
+    n_qubits = N_m // 2
+    H_L = PauliSumOp.from_list([("I" * n_qubits, 0.0)]) 
+    H_R = PauliSumOp.from_list([("I" * n_qubits, 0.0)])
+
+    params = [-.36, .19, -0.71, .22, .49]
+    qubits = [[0, 1, 3, 4], [0, 2, 3, 6], [0, 2, 4, 5], [1, 2, 3, 5], [1, 2, 4, 6]]
+
+    for i, q in enumerate(qubits):
+        H_L += params[i] * majorana_to_qubit_op(q[0], n_qubits, left=True) * majorana_to_qubit_op(q[1], n_qubits, left=True) * majorana_to_qubit_op(q[2], n_qubits, left=True) * majorana_to_qubit_op(q[3], n_qubits, left=True)
+
+        H_R += params[i] * majorana_to_qubit_op(q[0], n_qubits, left=False) * majorana_to_qubit_op(q[1], n_qubits, left=False) * majorana_to_qubit_op(q[2], n_qubits, left=False) * majorana_to_qubit_op(q[3], n_qubits, left=False)
+
+    # Initialize the Hamiltonian for the TFD state
+    H_LR = PauliSumOp.from_list([("I" * N_m, 0.0)])
+
+    identity_N = I ^ (N_m//2)
+
+    # Embed H_L in the left N qubits and H_R in the right N qubits
+    for term_L in H_L:
+        # Tensor product of term_L with identity on the right
+        H_LR += term_L.tensor(identity_N)
+
+    for term_R in H_R:
+        # Tensor product of identity on the left with term_R
+        H_LR += identity_N.tensor(term_R)
+
+    # --- prepare the V operator --- #
+    V = get_V(N_m)
+    # multiply by mu
+    V = mu * V
+    expV = time_evolve(V, tf=1)
+
+    # --- run VQE to get the TFD state for given choice of ansatz --- #
+    TFD = run_VQE(H_LR,  V, ans = ans, display_circs=display_circs, benchmark=False)
+
+    # --- negative and positive time ev  --- #
+    tev_nt0 = time_evolve(H_L, tf=-t0)
+    tev_pt0 = time_evolve(H_L, tf=t0)
+
+    if display_circs:
+        tev_nt0.draw('mpl')
+        plt.savefig('results_new/tev_nt0.pdf')
+        tev_pt0.draw('mpl')
+        plt.savefig('results_new/tev_pt0.pdf')
+
+    # --- run the protocol --- #
+    mutual_infos = []
+    for t in np.linspace(0, tf, t_steps):
+        mutual_infos.append(protocol_round(H_R, TFD, expV, tev_nt0, tev_pt0, t, display_circs=display_circs))
+
+    # save the mutual infos
+    if subdir is  None:
+        if not os.path.exists('results_new'):
+            os.makedirs('results_new')
+        save_dir = 'results_new'
+    else:
+        if not os.path.exists(f'results_new/{subdir}'):
+            os.makedirs(f'results_new/{subdir}')
+        save_dir = f'results_new/{subdir}'
+
+    mutual_infos = np.array(mutual_infos)
+    timestamp = int(time.time())
+    np.save(os.path.join(save_dir, f'mutual_infos_{N_m}_{ans}_{mu}_{timestamp}.npy'), mutual_infos)
+
+    # make the plot
+    if plot_result:
+        plt.figure(figsize=(10, 5))
+        plt.plot(np.linspace(0, tf, t_steps), mutual_infos)
+        plt.xlabel('Time')
+        plt.ylabel('Mutual Information')
+        plt.title(f'Mutual Information for $N_m = {N_m}$, ans = {ans}, $\mu = {mu}$')
+        plt.savefig(os.path.join(save_dir, f'mutual_info_{N_m}_{ans}_{mu}_{timestamp}.pdf'))
+        
+    return mutual_infos
+    
+
+        
+
+
 ## ---- making plots for thesis ---- ##
 def plot_reconstruct(sim_path1=['results_new/I_3_1708557041_True.npy', 'results_new/I_sem_3_1708557041_True.npy'], sim_path2 = ['results_new/I_3_1708411432.npy', 'results_new/I_sem_3_1708411432.npy'], data_path=['results_new/I_3_1708513045_False.npy', 'results_new/I_sem_3_1708513045_False.npy'], comparison_path='mi_data/mi_2.csv'):
 
@@ -1235,5 +1316,7 @@ if __name__ == '__main__':
     # plot_MI_benchmark(subdir='1709029808.6135924', standardize=True)
     # plot_H(N_m)
 
-    simplify_H(N_m, left=True, method=2, num_rand=1000000, parallelize=False, binned=True, temp_init=0.1, lambda_fix = 0.7)
+    test_learned_hamiltonian()
+
+    # simplify_H(N_m, left=True, method=2, num_rand=1000000, parallelize=False, binned=True, temp_init=0.1, lambda_fix = 0.7)
     # test_simplify_H('H_True_1709631423_None.npy', 'params_True_1709631423_None.npy')
