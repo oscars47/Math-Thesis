@@ -340,7 +340,7 @@ def run_VQE(H_LR, V, beta=4, ans=0, display_circs=False, benchmark=False):
     # now perform VQE
     # Set up the optimizer
     # optimizer = SPSA(maxiter=1000)
-    optimizer = L_BFGS_B()
+    optimizer = L_BFGS_B(max_evals_grouped=100)
 
     # Set up the backend and quantum instance
     seed = 47
@@ -348,7 +348,7 @@ def run_VQE(H_LR, V, beta=4, ans=0, display_circs=False, benchmark=False):
     backend = Aer.get_backend('aer_simulator_statevector')
     quantum_instance = QuantumInstance(backend, seed_simulator=seed, seed_transpiler=seed)
 
-    # Run VQE with your custom ansatz
+    # Run VQE with custom ansatz
     vqe = VQE(ansatz, optimizer, quantum_instance=quantum_instance)
     result = vqe.compute_minimum_eigenvalue(H_TFD)
     optimal_parameters = result.optimal_parameters

@@ -3,8 +3,11 @@ Repo for all the code used in my math thesis at Pomona College ('24) with Prof. 
 
 ## Major updates
 
+## 4/12/24
+* also tried ```L_BFGS_B``` optimizer with multiple simulataneous evaluations, and still the result is inconsistent with the expected behavior.
+
 ## 4/7/24
-* implementing their hamiltonian. result is nonsensical:not enough mutual information difference. tried doing the optimizer 1000 times instead of 100, and now basically 0 mutual information for the 
+* implementing their hamiltonian. result is nonsensical:not enough mutual information difference. tried doing the optimizer 1000 times instead of 100, and now basically 0 mutual information. 
 
 ## 4/2/24
 * looking into error mitigation
