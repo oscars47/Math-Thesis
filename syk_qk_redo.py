@@ -7,7 +7,7 @@ from qiskit.quantum_info import Operator, DensityMatrix, partial_trace, entropy
 from qiskit.utils import QuantumInstance, algorithm_globals
 from qiskit.circuit.library import PauliEvolutionGate, EfficientSU2
 from qiskit.algorithms import VQE
-from qiskit.algorithms.optimizers import SPSA
+from qiskit.algorithms.optimizers import SPSA, L_BFGS_B
 from qiskit.algorithms import NumPyMinimumEigensolver
 from qiskit.circuit import Parameter
 from qiskit.opflow import I, X, Y, Z, PauliSumOp, PauliOp
@@ -238,10 +238,10 @@ def run_VQE(H_LR, V, beta=4, ans=0, display_circs=False, benchmark=False):
     if ans == 0:
         ansatz = EfficientSU2(2*N, reps=1)
         # print out the circuit in the basis of u3 and cx gates
-        ansatz_t = transpile(ansatz, basis_gates=['cx', 'u3'])
+        # ansatz_t = transpile(ansatz, basis_gates=['cx', 'u3'])
         # if display_circs:
-        ansatz_t.draw('mpl')
-        plt.savefig('results_new/vqe_circuit_0.pdf')
+        # ansatz_t.draw('mpl')
+        # plt.savefig('results_new/vqe_circuit_0.pdf')
 
     elif ans == 1 or ans == 2:
         ansatz = QuantumCircuit(2*N)
@@ -339,7 +339,8 @@ def run_VQE(H_LR, V, beta=4, ans=0, display_circs=False, benchmark=False):
 
     # now perform VQE
     # Set up the optimizer
-    optimizer = SPSA(maxiter=100)
+    # optimizer = SPSA(maxiter=1000)
+    optimizer = L_BFGS_B()
 
     # Set up the backend and quantum instance
     seed = 47
