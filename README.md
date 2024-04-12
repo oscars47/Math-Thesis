@@ -5,6 +5,8 @@ Repo for all the code used in my math thesis at Pomona College with Professor Am
 
 For full documentation of the science updates and particulars of the code, see ```README-sci.md```. 
 
+For a detailed description of the physics behind this project, check out my thesis in ```writing/```. Also included is my senior talk.
+
 ## At a glance
 
 * The most relevant file is ```syk_qk_redo.py```. It contains all the main code used in my thesis, which aims to implement the process of wormhole teleportation from Jafferis et al. 2022 (https://www.nature.com/articles/s41586-022-05424-3). It is written in Python and uses Qiskit version 0.45.2 (there is a known incompatability with Qiskit 1.0, and I am planning on resolving this issue soon). There is a known conflict in the results of the simulation with what is expected in Jafferis et al. Read chapter 3 of my thesis if you are curious to learn more.
